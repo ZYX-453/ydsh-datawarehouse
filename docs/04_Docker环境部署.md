@@ -231,13 +231,25 @@ docker pull mysql:8.0
 如果仍然失败，直接用**指定的可用源**拉取，这样不改动 `daemon.json`：
 
 ```bash
-# 用当前实测可用的源拉取，再打回标准标签
+# 官方镜像（Docker Hub library 下的）→ 路径要带 library/
 docker pull docker.1ms.run/library/mysql:8.0
 docker tag  docker.1ms.run/library/mysql:8.0  mysql:8.0
 
-docker pull docker.1ms.run/library/apache/hive:4.0.0
-docker tag  docker.1ms.run/library/apache/hive:4.0.0  apache/hive:4.0.0
+# 非官方镜像（有命名空间的）→ 路径不带 library/
+docker pull docker.1ms.run/apache/hive:4.0.0
+docker tag  docker.1ms.run/apache/hive:4.0.0  apache/hive:4.0.0
 ```
+
+> **⚠️ 路径规则（很容易错）**：
+> `library/` 前缀**只用于 Docker Hub 官方镜像**（mysql、alpine、nginx、redis、postgres 等，
+> 它们完整名是 `library/mysql`）。带命名空间的镜像如 `apache/hive` **不能加** `library/`，
+> 否则报 `not found`。
+>
+> | 镜像 | 正确路径 |
+> |---|---|
+> | `mysql:8.0` | `docker.1ms.run/library/mysql:8.0` |
+> | `alpine:3.19` | `docker.1ms.run/library/alpine:3.19` |
+> | `apache/hive:4.0.0` | `docker.1ms.run/apache/hive:4.0.0` |
 
 ### 镜像源实测记录（2026-10-27）
 
