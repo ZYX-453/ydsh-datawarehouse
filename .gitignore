@@ -1,0 +1,43 @@
+# ===== 数据文件（体积大，不纳入版本库）=====
+data/
+模拟数据/
+*.csv
+*.zip
+
+# ===== 密钥与本地配置 =====
+.env
+.env.*
+*.key
+*.pem
+
+# ===== 日志与临时文件 =====
+*.log
+logs/
+tmp/
+temp/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ===== Node =====
+node_modules/
+
+# ===== IDE / 编辑器 =====
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ===== Office 临时文件 =====
+~$*
+.DS_Store
+
+# ===== 本地工具目录 =====
+.workbuddy/
+
+# ===== Docker 运行时产物 =====
+docker/volumes/
