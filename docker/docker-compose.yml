@@ -1,0 +1,132 @@
+# =============================================================================
+# 云购生活新零售企业 —— 数据仓库环境编排
+# -----------------------------------------------------------------------------
+# 文件   : docker/docker-compose.yml
+# 作者   : 张宇翔
+# 用法   : cd docker && docker-compose up -d
+#
+# 服务构成：
+#   mysql           : MySQL 8.0，作为 Hive Metastore 的元数据库
+#                     【宿主机端口 13306】—— 因本机已有本地 MySQL 占用 3306，
+#                     为避免冲突改用 13306。容器内部仍为标准 3306。
+#   hive-metastore  : Hive 4.0.0 Metastore，对外暴露 Thrift 9083
+#   hive-server     : Hive 4.0.0 HiveServer2，对外暴露 JDBC 10000 / Web UI 10002
+#
+# 关键设计说明：
+#   1) Hive 4.0.0 官方镜像用 SERVICE_NAME 决定启动哪个服务角色，
+#      metastore 与 hiveserver2 必须分别以两个容器启动（本文件即如此）。
+#   2) Hive 4.0 不再读取旧版 HIVE_SITE_CONF_* 环境变量，改为通过 SERVICE_OPTS
+#      以 -D 形式注入配置项；本文件用 YAML 折叠语法（>-）拼接多个 -D 参数。
+#   3) apache/hive 镜像【不含 MySQL JDBC 驱动】，必须将 mysql-connector-j.jar
+#      挂载进 /opt/hive/lib/，否则 Metastore 启动报 ClassNotFoundException。
+#      jar 获取方式见 docs/04_Docker环境部署.md。
+#   4) MySQL 8 连接需带 allowPublicKeyRetrieval=true&useSSL=false，
+#      否则报 "Public Key Retrieval is not allowed"。
+#   5) hive-warehouse 卷由 metastore 与 hiveserver2 共享，
+#      保证两个容器看到同一份表目录（否则建表后 HiveServer2 查不到数据）。
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------- MySQL ----
+  mysql:
+    image: mysql:8.0
+    container_name: ydsh-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: metastore
+      MYSQL_USER: hive
+      MYSQL_PASSWORD: hive
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      # 宿主机 13306 → 容器 3306（避开本机已占用的 3306）
+      - "13306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - ydsh-net
+
+  # ------------------------------------------------------ Hive Metastore ----
+  hive-metastore:
+    image: apache/hive:4.0.0
+    container_name: hive-metastore
+    restart: unless-stopped
+    environment:
+      SERVICE_NAME: metastore
+      DB_DRIVER: mysql
+      # 首次启动自动执行 schematool -initSchema 建元数据表；
+      # 若元数据库已存在（如重启时保留 mysql-data 卷），设 IS_RESUME=true 跳过初始化，
+      # 否则 schematool 会因 "Schema already exists" 退出导致容器起不来。
+      IS_RESUME: ${HIVE_IS_RESUME:-false}
+      SERVICE_OPTS: >-
+        -Djavax.jdo.option.ConnectionDriverName=com.mysql.cj.jdbc.Driver
+        -Djavax.jdo.option.ConnectionURL=jdbc:mysql://mysql:3306/metastore?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+        -Djavax.jdo.option.ConnectionUserName=hive
+        -Djavax.jdo.option.ConnectionPassword=hive
+        -Dmetastore.warehouse.dir=/opt/hive/data/warehouse
+        -Dhive.metastore.thrift.bind.host=0.0.0.0
+    ports:
+      - "9083:9083"
+    volumes:
+      # MySQL JDBC 驱动（镜像内不自带）
+      - ./lib/mysql-connector-j-8.4.0.jar:/opt/hive/lib/mysql-connector-j-8.4.0.jar:ro
+      # 与 hiveserver2 共享warehouse，保证元数据与数据文件一致
+      - hive-warehouse:/opt/hive/data/warehouse
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - ydsh-net
+
+  # ------------------------------------------------------- HiveServer2 ----
+  hive-server:
+    image: apache/hive:4.0.0
+    container_name: hive-server
+    restart: unless-stopped
+    hostname: hive-server
+    environment:
+      SERVICE_NAME: hiveserver2
+      IS_RESUME: "true"
+      SERVICE_OPTS: >-
+        -Dhive.metastore.uris=thrift://hive-metastore:9083
+        -Dhive.server2.thrift.bind.host=0.0.0.0
+        -Dhive.server2.thrift.port=10000
+        -Dhive.metastore.warehouse.dir=/opt/hive/data/warehouse
+        -Djavax.jdo.option.ConnectionDriverName=com.mysql.cj.jdbc.Driver
+        -Djavax.jdo.option.ConnectionURL=jdbc:mysql://mysql:3306/metastore?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+        -Djavax.jdo.option.ConnectionUserName=hive
+        -Djavax.jdo.option.ConnectionPassword=hive
+    ports:
+      - "10000:10000"   # JDBC / beeline
+      - "10002:10002"   # Web UI
+    volumes:
+      - ./lib/mysql-connector-j-8.4.0.jar:/opt/hive/lib/mysql-connector-j-8.4.0.jar:ro
+      - hive-warehouse:/opt/hive/data/warehouse
+      # 挂载项目数据目录，供 LOAD DATA LOCAL INPATH '/data/xxx.csv' 使用
+      # 注意：项目路径含中文，若挂载异常请改用 docker cp（见部署文档「已知问题」）
+      - ../data:/data
+    depends_on:
+      - hive-metastore
+    networks:
+      - ydsh-net
+
+volumes:
+  mysql-data:
+    name: ydsh-mysql-data
+  hive-warehouse:
+    name: ydsh-hive-warehouse
+
+networks:
+  ydsh-net:
+    name: ydsh-net
+    driver: bridge

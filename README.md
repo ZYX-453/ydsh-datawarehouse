@@ -149,16 +149,25 @@
 # 1. 启动基础服务（MySQL + Hive Metastore + HiveServer2）
 cd docker
 docker-compose up -d
-docker ps
+docker-compose ps
 
 # 2. 进入 beeline
 docker exec -it hive-server beeline -u jdbc:hive2://localhost:10000
 
-# 3. 依次执行脚本
-#    sql/ods/01_create_database.sql
-#    sql/ods/02_create_ods_tables.sql
-#    sql/ods/03_load_ods_data.sql
-#    sql/quality/01_quality_assessment.sql
+# 3. 一键执行全部脚本（ODS 建库 → 建表 → 导入 → 质量评估 → DWD 清洗）
+cd ..
+bash run_all.sh
+
+# 4. 或分阶段执行
+bash run_all.sh ods      # 仅 ODS 层
+bash run_all.sh clean    # 仅清洗层
 ```
 
-详细步骤与踩坑记录见 `docs/01_环境搭建笔记.md`。
+> **端口说明**：本机已有本地 MySQL 占用 3306，故 compose 中 MySQL 映射为宿主机 `13306`；
+> Hive 通过容器网络 `mysql:3306` 连接，不受影响。HiveServer2 为 `10000`，Web UI 为 `10002`。
+
+详细步骤与踩坑记录见：
+
+- `docs/01_环境搭建笔记.md` —— 环境搭建过程与问题记录
+- `docs/04_Docker环境部署.md` —— Docker 编排详解、端口与排错
+- `docs/05_Git远程仓库配置.md` —— 远程仓库配置与提交规范
