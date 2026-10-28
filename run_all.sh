@@ -35,11 +35,10 @@ warn() { printf '%b%s %s%b\n' "$YELLOW" "[$(date +%H:%M:%S)]" "$*" "$NC"; }
 #   排查时极易误判。printf '%b' 只对格式串生效，参数按原样输出。
 err()  { printf '%b%s %s%b\n' "$RED" "[$(date +%H:%M:%S)]" "$*" "$NC"; }
 
-# ------------------------------------------------------------ 路径转换 ----
-# 【必须】Docker Desktop 是 Windows 程序，不认 Git Bash 的 Unix 路径。
-#   /f/企业项目实战/sql/x.sql  →  Docker 解析成 F:\f\企业项目实战\...  → 文件不存在
-#   docker cp 因此失败，beeline 报 "File ... does not exist" 并返回退出码 2。
-# 所有传给 docker 的宿主机路径都必须先经此函数转成 Windows 形式。
+# ------------------------------------------------------------ 路径显示 ----
+# 把 Git Bash 的 Unix 路径转成 Windows 形式，仅用于错误提示中给人看的可读路径。
+# （脚本本身不再把宿主路径交给 docker，改为直接执行容器内挂载路径 /sql/...）
+# 例：/f/企业项目实战/sql/x.sql  →  F:\企业项目实战\sql\x.sql
 win_path() {
     if command -v cygpath >/dev/null 2>&1; then
         cygpath -w "$1"
@@ -119,51 +118,44 @@ prepare_data() {
 # ------------------------------------------------------------ 执行单个脚本 ----
 run_sql() {
     local f="$1"
-    local base log_file
+    local base log_file cpath
     base="$(basename "$f")"
     log_file="$LOG_DIR/${base%.sql}.log"
 
+    # 把宿主机绝对路径换算成容器内路径。
+    # 容器把宿主机 <项目>/sql 挂载为 /sql（见 docker-compose.yml），
+    # 所以 /项目/sql/ods/01_x.sql 在容器内就是 /sql/ods/01_x.sql。
+    cpath="/sql/${f#"$SCRIPT_DIR"/sql/}"
+
     if [ ! -f "$f" ]; then
-        err "文件不存在：$f"; return 1
+        err "文件不存在：$(win_path "$f")"; return 1
+    fi
+
+    # 【为什么直接执行容器内路径，不再传输文件】
+    #   此前两种"把脚本搬进容器"的方式在 Git Bash 环境都不可靠：
+    #     ① docker cp        —— 依赖宿主路径解析，Windows + 中文路径下不稳
+    #     ② docker exec -i + stdin 重定向
+    #        —— Git Bash（mintty 伪终端）下子进程拿不到重定向内容，
+    #           会生成 0 字节文件，3 次重试全失败
+    #   改为把 sql/ 目录直接挂进容器后，脚本本来就在容器里，没有"传输"这个环节，
+    #   不可能失败，也不再有残留旧文件导致"执行了上一轮 SQL"的隐患。
+    if ! docker exec "$HIVE_CONTAINER" test -s "$cpath" 2>/dev/null; then
+        err "容器内找不到脚本：$cpath"
+        err "  宿主机文件：$(win_path "$f")"
+        err "  请确认 docker-compose.yml 中已挂载  ../sql:/sql  并重建容器："
+        err "    cd docker && docker-compose up -d --force-recreate hive-server"
+        return 1
     fi
 
     log "执行 $base"
 
-    # ① 传输 SQL 到容器
-    #   【为什么用 stdin 重定向而不是 docker cp】
-    #   docker cp 在 Windows + 中文路径 + Git Bash 环境下会偶发失败：
-    #   宿主机路径需先经 cygpath 转成 Windows 形式，否则 /f/项目 会被解析成 F:\f\项目；
-    #   即使路径转换正确，也出现过传输偶发失败。
-    #   更麻烦的是：失败后若容器内残留同名旧文件，校验会通过，
-    #   实际执行的却是上一轮的旧 SQL —— 脚本显示"成功"但结果已过期，极难察觉。
-    #   改用 docker exec -i + cat 重定向后：文件由 Git Bash 直接读取，
-    #   内容经 stdin 传入容器，完全绕开 Docker 的宿主路径解析，实测 15/15 稳定。
-    #   （win_path 仅在下面的错误提示中用于展示可读路径，不再参与实际传输）
-    docker exec -u root "$HIVE_CONTAINER" rm -f "/tmp/$base" 2>/dev/null || true
-
-    local try
-    for try in 1 2 3; do
-        if docker exec -i "$HIVE_CONTAINER" sh -c "cat > /tmp/$base" < "$f" 2>/dev/null \
-           && docker exec "$HIVE_CONTAINER" test -s "/tmp/$base" 2>/dev/null; then
-            break
-        fi
-        if [ "$try" -eq 3 ]; then
-            err "SQL 文件传输到容器失败（已重试 3 次）：$base"
-            err "  宿主机文件：$(win_path "$f")"
-            err "  请确认该文件存在、容器 $HIVE_CONTAINER 正常运行"
-            return 1
-        fi
-        warn "传输 $base 第 $try 次失败，重试..."
-        sleep 1
-    done
-
-    # ② 执行并把输出写入日志文件
+    # 执行并把输出写入日志文件
     docker exec "$HIVE_CONTAINER" \
-        beeline -u "$HIVE_JDBC" --silent=true --force=true -f "/tmp/$base" 2>&1 \
+        beeline -u "$HIVE_JDBC" --silent=true --force=true -f "$cpath" 2>&1 \
         | tee "$log_file"
     local rc=${PIPESTATUS[0]}
 
-    # ③ 双重判定：退出码 + 日志中的 Error
+    # 双重判定：退出码 + 日志中的 Error
     #   注意：--force=true 会让 beeline 忽略 SQL 错误并返回 0，
     #   所以只看退出码会漏掉真正的 SQL 报错，必须同时扫描日志。
     local sql_err
@@ -195,8 +187,13 @@ fix_charset() {
         warn "未找到 $f，跳过（中文注释可能显示为 ?）"
         return 0
     fi
-    # 用 stdin 重定向把脚本喂给容器内的 mysql，避免 docker cp 的路径转换问题；
-    # 密码通过 MYSQL_PWD 环境变量传递，不出现在命令行里。
+    # 用 stdin 重定向直接把脚本喂给容器内的 mysql，密码通过 MYSQL_PWD 环境变量传递
+    # （不出现在命令行里）。
+    # 【为什么这里用 stdin 是安全的】
+    #   实测在 Git Bash（mintty 伪终端）下，`mysql < 文件` 这种「命令自身读 stdin」
+    #   的形式工作正常；而 run_sql 里 `sh -c "cat > 文件" < 文件` 这种
+    #   「多套一层 shell 再由 cat 读 stdin」的形式会拿到空内容 —— 两者行为不同。
+    #   故此处保留 stdin 方式，避免为 mysql 容器也挂载一次 sql 目录。
     if docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" "$MYSQL_CONTAINER" \
             mysql -uroot < "$f" >/dev/null 2>&1; then
         log "字符集修复完成"

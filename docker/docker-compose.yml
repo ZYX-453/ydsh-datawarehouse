@@ -118,8 +118,14 @@ services:
       - ./lib/mysql-connector-j-8.4.0.jar:/opt/hive/lib/mysql-connector-j-8.4.0.jar:ro
       - hive-warehouse:/opt/hive/data/warehouse
       # 挂载项目数据目录，供 LOAD DATA LOCAL INPATH '/data/xxx.csv' 使用
-      # 注意：项目路径含中文，若挂载异常请改用 docker cp（见部署文档「已知问题」）
       - ../data:/data
+      # 挂载 SQL 脚本目录（只读），供 beeline -f /sql/xxx.sql 直接执行。
+      # 【为什么挂载而不是把脚本传进容器】
+      #   docker cp 依赖宿主路径解析，在 Windows + 中文路径 + Git Bash 下不可靠；
+      #   docker exec -i + stdin 重定向在 Git Bash（mintty 伪终端）下也拿不到文件内容，
+      #   会生成 0 字节文件导致执行失败。
+      #   直接挂载后，容器内就能看到脚本，彻底没有"传输"这个环节，不可能失败。
+      - ../sql:/sql:ro
     depends_on:
       - hive-metastore
     networks:

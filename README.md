@@ -92,17 +92,32 @@
 ├── .gitattributes             换行符与二进制文件规则
 ├── data/                      数据文件副本（不纳入版本库）
 ├── docker/                    Docker 编排相关
-├── sql/
+│   ├── docker-compose.yml     MySQL + Hive Metastore + HiveServer2
+│   ├── .env.example           环境变量模板
+│   └── lib/                   JDBC 驱动（MySQL / PostgreSQL）
+├── sql/                       SQL 脚本（整体挂载进容器为 /sql）
 │   ├── ods/                   ODS 贴源层脚本
 │   │   ├── 01_create_database.sql
 │   │   ├── 02_create_ods_tables.sql
 │   │   └── 03_load_ods_data.sql
 │   ├── quality/               数据质量预评估脚本
 │   │   └── 01_quality_assessment.sql
-│   └── clean/                 数据清洗脚本（缺失值 / 去重）
+│   ├── clean/                 数据清洗脚本（缺失值 / 去重）
+│   │   ├── 01_create_dwd_tables.sql
+│   │   ├── 02_handle_missing_values.sql
+│   │   ├── 03_deduplicate_orders.sql
+│   │   └── 04_cleaning_summary.sql
+│   └── fix/                   环境修复脚本
+│       └── fix_metastore_charset.sql
+├── scripts/
+│   └── prepare_data.py        数据预处理（CRLF→LF、去 BOM、校验）
 ├── docs/                      项目文档
 │   ├── 01_环境搭建笔记.md
-│   └── 02_数据质量预评估表.md
+│   ├── 02_数据质量预评估表.md
+│   ├── 03_数据清洗说明.md
+│   ├── 04_Docker环境部署.md
+│   └── 05_Git远程仓库配置.md
+├── run_all.sh                 一键执行脚本
 └── 模拟数据/                  原始数据集（不纳入版本库）
 ```
 
@@ -181,10 +196,13 @@ python scripts/prepare_data.py
 # 修复元数据字符集（保证中文注释）
 docker exec -i -e MYSQL_PWD=root ydsh-mysql mysql -uroot < sql/fix/fix_metastore_charset.sql
 
-# 逐脚本执行
-docker cp sql/ods/01_create_database.sql hive-server:/tmp/
-docker exec hive-server beeline -u jdbc:hive2://localhost:10000 -f /tmp/01_create_database.sql
+# 逐脚本执行：sql/ 目录已挂载进容器为 /sql，直接用容器内路径
+docker exec hive-server beeline -u jdbc:hive2://localhost:10000 -f /sql/ods/01_create_database.sql
 ```
+
+> **为什么不用 `docker cp` 传脚本**：Windows + 中文路径 + Git Bash 下不可靠，
+> 且失败时若容器残留旧文件会「假装成功、实际执行旧脚本」。
+> 现改为把 `sql/` 目录挂载进容器（`../sql:/sql:ro`），脚本直接在容器内执行，没有传输环节。
 
 ### 9.4 环境说明
 
