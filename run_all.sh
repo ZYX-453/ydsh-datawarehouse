@@ -17,6 +17,8 @@ set -uo pipefail
 
 HIVE_CONTAINER="${HIVE_CONTAINER:-hive-server}"
 HIVE_JDBC="${HIVE_JDBC:-jdbc:hive2://localhost:10000}"
+MYSQL_CONTAINER="${MYSQL_CONTAINER:-ydsh-mysql}"
+MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-root}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAGE="${1:-all}"
 
@@ -51,6 +53,39 @@ precheck() {
     log "beeline 连接正常"
 }
 
+# ------------------------------------------------------- 原始数据预处理 ----
+# 把 模拟数据/ 的 CSV 转成可被 Hive 直接导入的格式（CRLF→LF、去 BOM）
+# 这一步不能省：Hive 的 LINES TERMINATED BY 只支持 '\n'，
+# 而源文件是 CRLF，不转换会导致每行末字段带上 '\r'
+prepare_data() {
+    log "===== 原始数据预处理（CRLF→LF、去除 BOM）====="
+
+    local py=""
+    for c in python python3 py; do
+        if command -v "$c" >/dev/null 2>&1; then py="$c"; break; fi
+    done
+
+    if [ -z "$py" ]; then
+        err "未找到 python，无法执行数据预处理"
+        err "请安装 Python 3，或手动执行："
+        err "  python scripts/prepare_data.py"
+        exit 1
+    fi
+
+    # 路径转换：Git Bash 下 $SCRIPT_DIR 是 Unix 风格（/f/项目），
+    # Windows 版 Python 不认这种路径，需用 cygpath 转成 F:\项目
+    local py_script="$SCRIPT_DIR/scripts/prepare_data.py"
+    if command -v cygpath >/dev/null 2>&1; then
+        py_script="$(cygpath -w "$py_script")"
+    fi
+
+    if ! "$py" "$py_script"; then
+        err "数据预处理失败，终止执行"
+        exit 1
+    fi
+    echo
+}
+
 # ------------------------------------------------------------ 执行单个脚本 ----
 run_sql() {
     local f="$1"
@@ -76,8 +111,29 @@ run_sql() {
 }
 
 # ---------------------------------------------------------------- 分阶段 ----
+# --------------------------------------------------- Metastore 字符集修复 ----
+# Hive 官方 schema 把元数据表建成了 latin1，导致建表时的中文注释被存成 '?'。
+# 只转换注释类字段（不参与索引，不受 3072 字节索引长度限制）。
+# 幂等：重复执行无副作用；环境重建后必须执行一次。
+fix_charset() {
+    log "===== 修复 Metastore 字符集（中文注释）====="
+    local f="$SCRIPT_DIR/sql/fix/fix_metastore_charset.sql"
+    if [ ! -f "$f" ]; then
+        warn "未找到 $f，跳过（中文注释可能显示为 ?）"
+        return 0
+    fi
+    docker cp "$f" "$MYSQL_CONTAINER:/tmp/fix_charset.sql" >/dev/null 2>&1
+    if docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" "$MYSQL_CONTAINER" \
+            mysql -uroot < "$f" >/dev/null 2>&1; then
+        log "字符集修复完成"
+    else
+        warn "字符集修复失败（不影响数据，仅影响注释显示）"
+    fi
+}
+
 run_ods() {
     log "========== 阶段 1/2：ODS 贴源层 =========="
+    fix_charset
     run_sql "$SCRIPT_DIR/sql/ods/01_create_database.sql"
     run_sql "$SCRIPT_DIR/sql/ods/02_create_ods_tables.sql"
     run_sql "$SCRIPT_DIR/sql/ods/03_load_ods_data.sql"
@@ -94,6 +150,11 @@ run_clean() {
 
 # ------------------------------------------------------------------ main ----
 precheck
+
+# 只要涉及 ODS 导入，就必须先做数据预处理
+case "$STAGE" in
+    ods|all) prepare_data ;;
+esac
 
 case "$STAGE" in
     ods)   run_ods ;;

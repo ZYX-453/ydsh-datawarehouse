@@ -10,12 +10,19 @@
 -- 设计说明（重要，答辩会问）：
 --   1) 贴源层原则：字段类型与清洗规则均不做业务加工，只做结构与格式对齐，
 --      保留全部脏数据，便于后续做"清洗前/后"数据质量对比。
---   2) 【CRLF 陷阱】源 CSV 为 Windows CRLF 换行（已实测 6 张表全部 CRLF）。
---      若写成 LINES TERMINATED BY '\n'，每行最后一个字段会带上 '\r'，
---      导致 channel 变成 'APP\r'、枚举分组全部错位。故此处统一写 '\r\n'。
+--   2) 【CRLF 陷阱 —— 必须预处理，不能靠 LINES TERMINATED BY 解决】
+--      源 CSV 为 Windows CRLF 换行（已实测 6 张表全部 CRLF）。
+--      直觉上会想写 LINES TERMINATED BY 后跟 CRLF 转义来解决，但 Hive **不支持多字符行分隔符**：
+--          FAILED: SemanticException LINES TERMINATED BY only supports newline '\n' right now.
+--      该限制硬编码在 BaseSemanticAnalyzer 中，见 HIVE-5999 / HIVE-11996，
+--      2013 年提出、至今（Hive 4.x）未修复。
+--      ✅ 本项目采用的做法：导入前先把 CSV 的 CRLF 统一转为 LF（见 scripts/prepare_data.py），
+--         建表用默认 '\n' 即可。转换脚本同时会去掉 UTF-8 BOM。
+--      若不预处理就直接用 '\n' 建表导入，每行最后一个字段会带上 '\r'，
+--      导致 channel 变成 'APP\r'、枚举分组全部错位，且 COUNT(*) 完全正常，极难发现。
 --   3) 【BOM 陷阱】源 CSV 为 UTF-8 BOM 编码，BOM 位于第 1 行（表头）行首。
---      建表使用 skip.header.line.count=1 跳过表头时，BOM 随之被跳过，
---      因此首字段不会残留 '\ufeff'。导入后需用查询验证，见 03 脚本末尾。
+--      prepare_data.py 会去除 BOM；建表再用 skip.header.line.count=1 跳过表头行，
+--      双重保障首字段不残留 '\ufeff'。导入后需用查询验证，见 03 脚本末尾。
 --   4) 字段分隔符统一为英文逗号 ','。源文件已实测：无引号包裹、无中文逗号、
 --      无制表符、每行字段数与表头完全一致，故无需 OpenCSVSerde。
 -- ============================================================================
@@ -41,7 +48,7 @@ CREATE TABLE ods_user (
 COMMENT '用户信息表-ODS贴源层'
 ROW FORMAT DELIMITED
     FIELDS TERMINATED BY ','
-    LINES TERMINATED BY '\r\n'
+    LINES TERMINATED BY '\n'
 STORED AS TEXTFILE
 TBLPROPERTIES (
     'skip.header.line.count' = '1',
@@ -67,7 +74,7 @@ CREATE TABLE ods_product (
 COMMENT '商品信息表-ODS贴源层'
 ROW FORMAT DELIMITED
     FIELDS TERMINATED BY ','
-    LINES TERMINATED BY '\r\n'
+    LINES TERMINATED BY '\n'
 STORED AS TEXTFILE
 TBLPROPERTIES (
     'skip.header.line.count' = '1',
@@ -92,7 +99,7 @@ CREATE TABLE ods_store (
 COMMENT '门店信息表-ODS贴源层'
 ROW FORMAT DELIMITED
     FIELDS TERMINATED BY ','
-    LINES TERMINATED BY '\r\n'
+    LINES TERMINATED BY '\n'
 STORED AS TEXTFILE
 TBLPROPERTIES (
     'skip.header.line.count' = '1',
@@ -118,7 +125,7 @@ CREATE TABLE ods_order (
 COMMENT '订单主表-ODS贴源层'
 ROW FORMAT DELIMITED
     FIELDS TERMINATED BY ','
-    LINES TERMINATED BY '\r\n'
+    LINES TERMINATED BY '\n'
 STORED AS TEXTFILE
 TBLPROPERTIES (
     'skip.header.line.count' = '1',
@@ -140,7 +147,7 @@ CREATE TABLE ods_order_item (
 COMMENT '订单明细表-ODS贴源层'
 ROW FORMAT DELIMITED
     FIELDS TERMINATED BY ','
-    LINES TERMINATED BY '\r\n'
+    LINES TERMINATED BY '\n'
 STORED AS TEXTFILE
 TBLPROPERTIES (
     'skip.header.line.count' = '1',
@@ -162,7 +169,7 @@ CREATE TABLE ods_user_behavior (
 COMMENT '用户行为日志表-ODS贴源层'
 ROW FORMAT DELIMITED
     FIELDS TERMINATED BY ','
-    LINES TERMINATED BY '\r\n'
+    LINES TERMINATED BY '\n'
 STORED AS TEXTFILE
 TBLPROPERTIES (
     'skip.header.line.count' = '1',

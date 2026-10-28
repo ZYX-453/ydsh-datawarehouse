@@ -19,6 +19,27 @@
 
 USE ydsh_ods;
 
+-- ----------------------------------------------------------------------------
+-- 运行参数（解决 Tez 计数器上限问题）
+--   Hive 4.0 + Tez 默认每个 DAG 最多 120 个计数器，多表 UNION ALL 会超限：
+--     FAILED: Execution Error, return code 2 from TezTask.
+--     Counters limit exceeded: Too many counters: 121 max=120
+--   该上限需在 tez-site.xml 配置，beeline 中 SET 不生效（已实测）。
+--   故本脚本采用拆分写法规避，见第六部分说明。
+-- ----------------------------------------------------------------------------
+-- 改用 MR 引擎执行：本脚本以轻量校验查询为主，数据量小（最大 6 万行），
+-- MR 完全够用，且不受 Tez 计数器上限约束（Tez 上限需改 tez-site.xml，SET 无效）。
+-- 使用默认 Tez 引擎。注意事项（均已实测验证）：
+--   ① MR 引擎不可用：MR 下 COUNT(*) 恒比实际多 1（ods_store 返回 61，实际 60，
+--      关闭 hive.compute.query.using.stats 亦无效），数据校验必须以 Tez 结果为准。
+--   ② Tez 计数器上限：每个 DAG 默认最多 120 个计数器，多表 UNION ALL（≥6 表）
+--      或 6 组 JOIN 会触发
+--        Counters limit exceeded: Too many counters: 121 max=120
+--      该上限需在 tez-site.xml 配置，beeline 中 SET tez.counters.max 不生效（已实测）。
+--      故本脚本所有多表对比均拆成独立查询，请勿合并回 UNION ALL。
+SET hive.vectorized.execution.enabled=false;
+
+
 -- ############################################################################
 -- 一、完整性（Completeness）—— 各表字段空值率
 -- ############################################################################
@@ -99,11 +120,21 @@ FROM (
 ) t;
 
 -- 2.4 其余各表主键唯一性（留证，预期全部无重复）
-SELECT 'ods_user'          AS table_name, COUNT(*) AS total, COUNT(DISTINCT user_id)     AS distinct_pk FROM ods_user
-UNION ALL SELECT 'ods_product',       COUNT(*), COUNT(DISTINCT product_id)  FROM ods_product
-UNION ALL SELECT 'ods_store',         COUNT(*), COUNT(DISTINCT store_id)    FROM ods_store
-UNION ALL SELECT 'ods_order_item',    COUNT(*), COUNT(DISTINCT item_id)     FROM ods_order_item
-UNION ALL SELECT 'ods_user_behavior', COUNT(*), COUNT(DISTINCT behavior_id) FROM ods_user_behavior;
+--     拆成独立查询：多表 UNION ALL 会累积 Tez 计数器并触发上限报错
+SELECT 'ods_user' AS table_name, COUNT(*) AS total_rows,
+       COUNT(DISTINCT user_id) AS distinct_pk FROM ods_user;
+
+SELECT 'ods_product' AS table_name, COUNT(*) AS total_rows,
+       COUNT(DISTINCT product_id) AS distinct_pk FROM ods_product;
+
+SELECT 'ods_store' AS table_name, COUNT(*) AS total_rows,
+       COUNT(DISTINCT store_id) AS distinct_pk FROM ods_store;
+
+SELECT 'ods_order_item' AS table_name, COUNT(*) AS total_rows,
+       COUNT(DISTINCT item_id) AS distinct_pk FROM ods_order_item;
+
+SELECT 'ods_user_behavior' AS table_name, COUNT(*) AS total_rows,
+       COUNT(DISTINCT behavior_id) AS distinct_pk FROM ods_user_behavior;
 
 -- ############################################################################
 -- 三、有效性（Validity）—— 枚举取值合法性
@@ -189,23 +220,30 @@ SELECT
 FROM ods_user_behavior;
 
 -- 4.5 跨表关联完整性：孤儿外键检查（预期全部为 0）
-SELECT 'order_item→order'   AS relation, COUNT(*) AS orphan_cnt
-FROM ods_order_item i LEFT JOIN ods_order o ON i.order_id = o.order_id WHERE o.order_id IS NULL
-UNION ALL
-SELECT 'order_item→product', COUNT(*)
-FROM ods_order_item i LEFT JOIN ods_product p ON i.product_id = p.product_id WHERE p.product_id IS NULL
-UNION ALL
-SELECT 'order→user',         COUNT(*)
-FROM ods_order o LEFT JOIN ods_user u ON o.user_id = u.user_id WHERE u.user_id IS NULL
-UNION ALL
-SELECT 'order→store',        COUNT(*)
-FROM ods_order o LEFT JOIN ods_store s ON o.store_id = s.store_id WHERE s.store_id IS NULL
-UNION ALL
-SELECT 'behavior→user',      COUNT(*)
-FROM ods_user_behavior b LEFT JOIN ods_user u ON b.user_id = u.user_id WHERE u.user_id IS NULL
-UNION ALL
-SELECT 'behavior→product',   COUNT(*)
-FROM ods_user_behavior b LEFT JOIN ods_product p ON b.product_id = p.product_id WHERE p.product_id IS NULL;
+--     拆成独立查询：6 组 JOIN 的 UNION ALL 会累积 Tez 计数器并触发上限报错
+SELECT 'order_item→order' AS relation, COUNT(*) AS orphan_cnt
+FROM ods_order_item i LEFT JOIN ods_order o ON i.order_id = o.order_id
+WHERE o.order_id IS NULL;
+
+SELECT 'order_item→product' AS relation, COUNT(*) AS orphan_cnt
+FROM ods_order_item i LEFT JOIN ods_product p ON i.product_id = p.product_id
+WHERE p.product_id IS NULL;
+
+SELECT 'order→user' AS relation, COUNT(*) AS orphan_cnt
+FROM ods_order o LEFT JOIN ods_user u ON o.user_id = u.user_id
+WHERE u.user_id IS NULL;
+
+SELECT 'order→store' AS relation, COUNT(*) AS orphan_cnt
+FROM ods_order o LEFT JOIN ods_store s ON o.store_id = s.store_id
+WHERE s.store_id IS NULL;
+
+SELECT 'behavior→user' AS relation, COUNT(*) AS orphan_cnt
+FROM ods_user_behavior b LEFT JOIN ods_user u ON b.user_id = u.user_id
+WHERE u.user_id IS NULL;
+
+SELECT 'behavior→product' AS relation, COUNT(*) AS orphan_cnt
+FROM ods_user_behavior b LEFT JOIN ods_product p ON b.product_id = p.product_id
+WHERE p.product_id IS NULL;
 
 -- 4.6 无明细的订单（预期为 0，保证订单与明细可完全关联）
 SELECT COUNT(*) AS order_without_item
@@ -290,9 +328,27 @@ FROM ods_store;
 -- ############################################################################
 -- 六、汇总：一张表看全貌（用于报告首页）
 -- ############################################################################
-SELECT 'ods_user'          AS table_name, COUNT(*) AS rows_cnt, 'gender/age/member_level/email' AS null_fields FROM ods_user
-UNION ALL SELECT 'ods_product',       COUNT(*), 'launch_date'          FROM ods_product
-UNION ALL SELECT 'ods_store',         COUNT(*), '无'                  FROM ods_store
-UNION ALL SELECT 'ods_order',         COUNT(*), '无（但主键重复 600 行）' FROM ods_order
-UNION ALL SELECT 'ods_order_item',    COUNT(*), '无'                  FROM ods_order_item
-UNION ALL SELECT 'ods_user_behavior', COUNT(*), '无'                  FROM ods_user_behavior;
+-- 说明：此处刻意拆成 6 条独立查询，而不是一条 6 表 UNION ALL。
+--   UNION ALL 6 张表会让 Tez 起 6 个任务并累积计数器，
+--   超过 Tez 默认上限（max=120）直接报错：
+--     Counters limit exceeded: Too many counters: 121 max=120
+--   该上限在 tez-site.xml 中配置，beeline 里 SET tez.counters.max 不生效，
+--   故采用拆分写法规避 —— 每张表单独统计，结果同样清晰，且不触发限制。
+
+SELECT 'ods_user'          AS table_name, COUNT(*) AS rows_cnt,
+       '有：gender/age/member_level/email' AS null_fields FROM ods_user;
+
+SELECT 'ods_product'       AS table_name, COUNT(*) AS rows_cnt,
+       '有：launch_date' AS null_fields FROM ods_product;
+
+SELECT 'ods_store'         AS table_name, COUNT(*) AS rows_cnt,
+       '无' AS null_fields FROM ods_store;
+
+SELECT 'ods_order'         AS table_name, COUNT(*) AS rows_cnt,
+       '无空值，但主键重复 600 行' AS null_fields FROM ods_order;
+
+SELECT 'ods_order_item'    AS table_name, COUNT(*) AS rows_cnt,
+       '无' AS null_fields FROM ods_order_item;
+
+SELECT 'ods_user_behavior' AS table_name, COUNT(*) AS rows_cnt,
+       '无' AS null_fields FROM ods_user_behavior;

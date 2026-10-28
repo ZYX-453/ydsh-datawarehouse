@@ -6,10 +6,16 @@
 -- 作者    : 张宇翔
 -- 依赖    : 01_create_database.sql、02_create_ods_tables.sql 已执行完毕
 --
--- 【执行前置条件】CSV 必须已存在于 HiveServer2 容器的 /data/ 目录下。
---   方式 A（推荐，docker-compose 已挂载）：宿主机 ./data 映射到容器 /data
---   方式 B（挂载失败时兜底）：docker cp data/. hive-server:/data/
---   注意：LOAD DATA LOCAL 里的 "local" 指"容器内本地路径"，不是宿主机路径。
+-- 【执行前置条件 —— 两步，缺一不可】
+--   ① 先跑数据预处理，生成可导入的 CSV：
+--        python scripts/prepare_data.py        # 模拟数据/ → data/（CRLF→LF、去 BOM）
+--      这一步不能省。Hive 的 LINES TERMINATED BY 只支持 '\n'，
+--      而原始 CSV 是 CRLF，不转换会导致每行末字段带上 '\r'（如 channel='APP\r'），
+--      枚举分组全部错位，且 COUNT(*) 完全正常，极难发现。
+--   ② CSV 必须位于 HiveServer2 容器的 /data/ 目录下。
+--      方式 A（推荐，docker-compose 已挂载）：宿主机 ../data 映射到容器 /data
+--      方式 B（挂载失败时兜底）：docker cp data/. hive-server:/data/
+--      注意：LOAD DATA LOCAL 里的 "local" 指"容器内本地路径"，不是宿主机路径。
 --
 -- 【路径说明】本机项目路径 F:\企业项目实战 含中文，个别 Docker 版本挂载中文路径
 --   可能失败。若 /data/ 下看不到文件，一律改用方式 B 的 docker cp。
