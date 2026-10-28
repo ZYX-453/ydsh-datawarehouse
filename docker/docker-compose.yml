@@ -24,7 +24,12 @@
 #      否则报 "Public Key Retrieval is not allowed"。
 #   5) hive-warehouse 卷由 metastore 与 hiveserver2 共享，
 #      保证两个容器看到同一份表目录（否则建表后 HiveServer2 查不到数据）。
+#   6) 【项目名必须显式指定】本文件所在目录名为 docker，compose 默认会把它当作
+#      项目名，与本机已运行的 Dify（项目名同样是 docker）冲突。一旦冲突，
+#      `docker-compose down` 会把 Dify 的容器一并删除。故用顶层 name 固定为 ydsh。
 # =============================================================================
+
+name: ydsh
 
 services:
 

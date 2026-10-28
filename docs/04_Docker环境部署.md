@@ -211,6 +211,64 @@ docker exec ydsh-mysql mysql -uhive -phive -e "use metastore; show tables;" | he
 
 ## 五、已知问题与解决方案
 
+### 问题 0：【高危】compose 项目名与既有项目冲突，`down` 会误删他人容器
+
+- **现象**：在本项目执行 `docker-compose up -d` 时输出警告：
+
+  ```
+  level=warning msg="Found orphan containers ([docker-nginx-1 docker-api-1 ...])
+  for this project. If you removed or renamed this service in your compose file,
+  you can run this command with the --remove-orphans flag to clean it up."
+  ```
+
+  同时列出了 13 个**与本项目无关**的容器（Dify 的运行环境）。
+- **排查**：查两个项目的 compose 项目标签，发现完全相同：
+
+  ```bash
+  docker inspect docker-nginx-1 --format '{{index .Config.Labels "com.docker.compose.project"}}'
+  # 输出：docker
+  docker inspect ydsh-mysql --format '{{index .Config.Labels "com.docker.compose.project"}}'
+  # 输出：docker   ← 撞了
+  ```
+
+- **根因**：Compose 默认把**所在目录名**当作项目名。本文件位于 `docker/` 目录，
+  项目名即为 `docker`；而本机早已有一个名为 `docker` 的项目（Dify）在运行。
+  两个项目一旦同名，Compose 认为对方的容器是「本项目的孤儿容器」。
+- **危害**：**执行 `docker-compose down` 会把 Dify 的 13 个容器一并停止并删除**；
+  加 `--remove-orphans` 危害更大。这是必须提前规避的破坏性风险。
+- **解决**：在 compose 文件顶层显式指定项目名（Compose v2.20+ 支持）：
+
+  ```yaml
+  name: ydsh
+
+  services:
+    ...
+  ```
+
+  验证是否生效：
+
+  ```bash
+  cd docker
+  docker-compose config --format json | python -c "import sys,json;print(json.load(sys.stdin)['name'])"
+  # 输出：ydsh
+  ```
+
+- **附带说明**：改项目名后，此前用旧项目名创建的卷和网络会留下，
+  日志提示 `volume "ydsh-mysql-data" already exists but was created for project "docker"`。
+  需清理后重建（**此操作只影响本项目资源**）：
+
+  ```bash
+  docker-compose down            # 不加 -v，保留数据卷
+  docker volume rm ydsh-mysql-data
+  docker network rm ydsh-net
+  docker-compose up -d
+  ```
+
+- **经验**：任何 compose 项目接入一个已有 Docker 环境时，**第一件事就是显式设 `name:`**，
+  不要依赖目录名推导。
+
+---
+
 ### 问题 1：拉取镜像报 `unexpected media type text/html`
 
 - **现象**：`docker pull mysql:8.0` 报
