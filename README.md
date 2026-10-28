@@ -189,6 +189,18 @@ bash run_all.sh clean    # 仅清洗层（前提：ODS 已就绪）
 
 ### 9.3 手工执行（调试用）
 
+> **Git Bash 用户注意**：执行任何带容器内路径（`/sql/...`）的 docker 命令前，
+> 需要先关闭 MSYS 的自动路径转换，否则 `/sql/ods/x.sql` 会被改写成
+> `<Git安装根>/sql/ods/x.sql` 而报 `No such file or directory`。
+> 先执行一次即可（当前窗口有效）：
+>
+> ```bash
+> export MSYS_NO_PATHCONV=1
+> export MSYS2_ARG_CONV_EXCL='*'
+> ```
+>
+> `run_all.sh` 内部已自动设置，直接跑脚本无需手动处理。
+
 ```bash
 # 预处理（必须先做，Hive 不支持多字符行分隔符）
 python scripts/prepare_data.py

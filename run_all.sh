@@ -15,6 +15,26 @@
 
 set -uo pipefail
 
+# =============================================================================
+# 【必须】禁用 Git Bash (MSYS) 的自动路径转换
+#
+# 现象：执行 docker exec hive-server ls /sql/ods/ 报
+#   ls: cannot access 'G:/Work/Codex/Git/Git/sql/ods/': No such file or directory
+# 注意报错里的路径不是 /sql/ods/，而是被拼到了 Git 安装根目录下。
+#
+# 原因：MSYS 会把传给外部程序（docker.exe）的、看起来像 Unix 绝对路径的参数
+# 自动转换成 Windows 路径。规则是把「/xxx」映射到「<MSYS 安装根>/xxx」，
+# 所以 /sql/ods/ 变成了 <Git安装目录>/sql/ods/，容器里自然找不到。
+# （容器内路径 /sql 并未改变，只是宿主端传参时被改写了）
+#
+# 解决：MSYS_NO_PATHCONV=1 关闭转换；MSYS2_ARG_CONV_EXCL='*' 是所有参数都不转换。
+# 这两个变量在部分终端环境（如 CI、某些 IDE 内置 bash）可能已预设，
+# 但在原生 Git Bash 窗口里通常没有 —— 这正是「脚本在 A 处能跑、B 处报错」的根源。
+# 故此处显式设置，不依赖外部环境。
+# =============================================================================
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL='*'
+
 HIVE_CONTAINER="${HIVE_CONTAINER:-hive-server}"
 HIVE_JDBC="${HIVE_JDBC:-jdbc:hive2://localhost:10000}"
 MYSQL_CONTAINER="${MYSQL_CONTAINER:-ydsh-mysql}"
