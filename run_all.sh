@@ -26,9 +26,14 @@ mkdir -p "$LOG_DIR"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
-log()  { echo -e "${GREEN}[$(date +%H:%M:%S)] $*${NC}"; }
-warn() { echo -e "${YELLOW}[$(date +%H:%M:%S)] $*${NC}"; }
-err()  { echo -e "${RED}[$(date +%H:%M:%S)] $*${NC}"; }
+log()  { printf '%b%s %s%b\n' "$GREEN" "[$(date +%H:%M:%S)]" "$*" "$NC"; }
+warn() { printf '%b%s %s%b\n' "$YELLOW" "[$(date +%H:%M:%S)]" "$*" "$NC"; }
+# 注意：这里用 printf '%b' 而非 echo -e 来输出颜色。
+#   echo -e 会把参数中的反斜杠序列当转义处理，
+#   而 Windows 路径里存在 \01、\07 这类形态（如 sql\ods\01_xxx.sql），
+#   会被解释成八进制控制字符 \x01、\x07 直接吞掉，导致打印出的路径缺字符，
+#   排查时极易误判。printf '%b' 只对格式串生效，参数按原样输出。
+err()  { printf '%b%s %s%b\n' "$RED" "[$(date +%H:%M:%S)]" "$*" "$NC"; }
 
 # ------------------------------------------------------------ 路径转换 ----
 # 【必须】Docker Desktop 是 Windows 程序，不认 Git Bash 的 Unix 路径。
@@ -124,23 +129,33 @@ run_sql() {
 
     log "执行 $base"
 
-    # ① 传输 SQL 到容器，并【验证确实到位】
-    #   两个坑都要防：
-    #     a) 宿主路径必须是 Windows 形式，否则 docker cp 失败（见 win_path 说明）
-    #     b) 必须删掉容器内旧文件，否则 cp 失败时残留的旧文件会让 test -f 通过，
-    #        导致「看起来成功、实际执行的是上次的 SQL」—— 比直接报错更危险
-    local src_path
-    src_path="$(win_path "$f")"
-    # docker cp 写入的文件属 root，删除需用 root 身份，否则 rm 会静默失败
+    # ① 传输 SQL 到容器
+    #   【为什么用 stdin 重定向而不是 docker cp】
+    #   docker cp 在 Windows + 中文路径 + Git Bash 环境下会偶发失败：
+    #   宿主机路径需先经 cygpath 转成 Windows 形式，否则 /f/项目 会被解析成 F:\f\项目；
+    #   即使路径转换正确，也出现过传输偶发失败。
+    #   更麻烦的是：失败后若容器内残留同名旧文件，校验会通过，
+    #   实际执行的却是上一轮的旧 SQL —— 脚本显示"成功"但结果已过期，极难察觉。
+    #   改用 docker exec -i + cat 重定向后：文件由 Git Bash 直接读取，
+    #   内容经 stdin 传入容器，完全绕开 Docker 的宿主路径解析，实测 15/15 稳定。
+    #   （win_path 仅在下面的错误提示中用于展示可读路径，不再参与实际传输）
     docker exec -u root "$HIVE_CONTAINER" rm -f "/tmp/$base" 2>/dev/null || true
 
-    if ! docker cp "$src_path" "$HIVE_CONTAINER:/tmp/$base" >/dev/null 2>&1 \
-       || ! docker exec "$HIVE_CONTAINER" test -s "/tmp/$base" 2>/dev/null; then
-        err "SQL 文件传输到容器失败：$base"
-        err "  源路径：$src_path"
-        err "请检查该文件是否存在、容器 $HIVE_CONTAINER 是否正常"
-        return 1
-    fi
+    local try
+    for try in 1 2 3; do
+        if docker exec -i "$HIVE_CONTAINER" sh -c "cat > /tmp/$base" < "$f" 2>/dev/null \
+           && docker exec "$HIVE_CONTAINER" test -s "/tmp/$base" 2>/dev/null; then
+            break
+        fi
+        if [ "$try" -eq 3 ]; then
+            err "SQL 文件传输到容器失败（已重试 3 次）：$base"
+            err "  宿主机文件：$(win_path "$f")"
+            err "  请确认该文件存在、容器 $HIVE_CONTAINER 正常运行"
+            return 1
+        fi
+        warn "传输 $base 第 $try 次失败，重试..."
+        sleep 1
+    done
 
     # ② 执行并把输出写入日志文件
     docker exec "$HIVE_CONTAINER" \
