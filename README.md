@@ -145,29 +145,75 @@
 
 ## 九、快速开始
 
+### 9.1 一键执行（推荐）
+
 ```bash
 # 1. 启动基础服务（MySQL + Hive Metastore + HiveServer2）
 cd docker
 docker-compose up -d
-docker-compose ps
+docker-compose ps          # 三个容器均应为 Up
 
-# 2. 进入 beeline
-docker exec -it hive-server beeline -u jdbc:hive2://localhost:10000
-
-# 3. 一键执行全部脚本（ODS 建库 → 建表 → 导入 → 质量评估 → DWD 清洗）
+# 2. 回到项目根目录，一键执行全流程
 cd ..
-bash run_all.sh
-
-# 4. 或分阶段执行
-bash run_all.sh ods      # 仅 ODS 层
-bash run_all.sh clean    # 仅清洗层
+bash run_all.sh            # 预处理 → 建库 → 建表 → 导入 → 质量评估 → DWD 清洗
 ```
 
-> **端口说明**：本机已有本地 MySQL 占用 3306，故 compose 中 MySQL 映射为宿主机 `13306`；
-> Hive 通过容器网络 `mysql:3306` 连接，不受影响。HiveServer2 为 `10000`，Web UI 为 `10002`。
+`run_all.sh` 会自动完成四件事，无需手工干预：
 
-详细步骤与踩坑记录见：
+1. `scripts/prepare_data.py` —— CSV 预处理（CRLF→LF、去 BOM、行数校验）
+2. `sql/fix/fix_metastore_charset.sql` —— 修复元数据字符集（保证中文注释正常）
+3. ODS 层建库、建表、导入、质量评估
+4. DWD 层建表、缺失值填充、订单去重、效果汇总
 
-- `docs/01_环境搭建笔记.md` —— 环境搭建过程与问题记录
+### 9.2 分阶段执行
+
+```bash
+bash run_all.sh ods      # 仅 ODS 层（含预处理与字符集修复）
+bash run_all.sh clean    # 仅清洗层（前提：ODS 已就绪）
+```
+
+### 9.3 手工执行（调试用）
+
+```bash
+# 预处理（必须先做，Hive 不支持多字符行分隔符）
+python scripts/prepare_data.py
+
+# 修复元数据字符集（保证中文注释）
+docker exec -i -e MYSQL_PWD=root ydsh-mysql mysql -uroot < sql/fix/fix_metastore_charset.sql
+
+# 逐脚本执行
+docker cp sql/ods/01_create_database.sql hive-server:/tmp/
+docker exec hive-server beeline -u jdbc:hive2://localhost:10000 -f /tmp/01_create_database.sql
+```
+
+### 9.4 环境说明
+
+| 项目 | 值 |
+|---|---|
+| MySQL 宿主机端口 | `13306`（本地 MySQL80 占用 3306） |
+| HiveServer2 JDBC | `10000` |
+| HiveServer2 Web UI | `http://localhost:10002` |
+| Hive Metastore | `9083` |
+| 数仓库 | `ydsh_ods` / `ydsh_dwd` / `ydsh_dws` / `ydsh_ads` |
+| compose 项目名 | `ydsh`（**必须显式指定**，否则与既有 Dify 项目冲突） |
+
+### 9.5 结果核对基准
+
+| 检查项 | 期望值 |
+|---|---|
+| ODS 六表行数 | 1000 / 600 / 60 / 15600 / 37549 / 60000 |
+| BOM、CR 残留 | 均为 0 |
+| DWD 用户表 | 1000 行，缺失值 0 |
+| DWD 商品表 | 600 行，缺失值 0 |
+| DWD 订单表 | **15000** 行（去重删 600） |
+| 明细表孤儿订单 | 0 |
+| 修复率 | 787 项 → 100% |
+
+### 9.6 相关文档
+
+- `docs/01_环境搭建笔记.md` —— 环境搭建过程、9 个问题的排查与解决
+- `docs/02_数据质量预评估表.md` —— 五维度评估与清洗前后对比
+- `docs/03_数据清洗说明.md` —— 清洗策略与决策依据
 - `docs/04_Docker环境部署.md` —— Docker 编排详解、端口与排错
 - `docs/05_Git远程仓库配置.md` —— 远程仓库配置与提交规范
+
