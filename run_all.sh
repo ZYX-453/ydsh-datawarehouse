@@ -21,12 +21,28 @@ MYSQL_CONTAINER="${MYSQL_CONTAINER:-ydsh-mysql}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-root}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAGE="${1:-all}"
+LOG_DIR="$SCRIPT_DIR/logs"
+mkdir -p "$LOG_DIR"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
 log()  { echo -e "${GREEN}[$(date +%H:%M:%S)] $*${NC}"; }
 warn() { echo -e "${YELLOW}[$(date +%H:%M:%S)] $*${NC}"; }
 err()  { echo -e "${RED}[$(date +%H:%M:%S)] $*${NC}"; }
+
+# ------------------------------------------------------------ 路径转换 ----
+# 【必须】Docker Desktop 是 Windows 程序，不认 Git Bash 的 Unix 路径。
+#   /f/企业项目实战/sql/x.sql  →  Docker 解析成 F:\f\企业项目实战\...  → 文件不存在
+#   docker cp 因此失败，beeline 报 "File ... does not exist" 并返回退出码 2。
+# 所有传给 docker 的宿主机路径都必须先经此函数转成 Windows 形式。
+win_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -w "$1"
+    else
+        # 非 Git Bash 环境（Linux/macOS）原样返回
+        printf '%s\n' "$1"
+    fi
+}
 
 # ---------------------------------------------------------------- 前置检查 ----
 precheck() {
@@ -51,6 +67,15 @@ precheck() {
         exit 1
     fi
     log "beeline 连接正常"
+
+    # 消除噪音：beeline 会在当前用户 home 下写 .beeline 历史文件，
+    # 容器内 hive 用户没有可写 home，每次执行都打印
+    #   [WARN] Failed to create directory: /home/hive/.beeline
+    # 该 WARN 无害，但会干扰日志阅读，也容易被误认为出错。
+    if ! docker exec "$HIVE_CONTAINER" test -d /home/hive 2>/dev/null; then
+        docker exec -u root "$HIVE_CONTAINER" mkdir -p /home/hive 2>/dev/null || true
+        docker exec -u root "$HIVE_CONTAINER" chown hive:hive /home/hive 2>/dev/null || true
+    fi
 }
 
 # ------------------------------------------------------- 原始数据预处理 ----
@@ -89,22 +114,55 @@ prepare_data() {
 # ------------------------------------------------------------ 执行单个脚本 ----
 run_sql() {
     local f="$1"
-    local base
+    local base log_file
     base="$(basename "$f")"
+    log_file="$LOG_DIR/${base%.sql}.log"
 
     if [ ! -f "$f" ]; then
         err "文件不存在：$f"; return 1
     fi
 
     log "执行 $base"
-    docker cp "$f" "$HIVE_CONTAINER:/tmp/$base" >/dev/null 2>&1
-    docker exec "$HIVE_CONTAINER" \
-        beeline -u "$HIVE_JDBC" --silent=true --force=true -f "/tmp/$base"
-    local rc=$?
 
-    if [ $rc -ne 0 ]; then
-        err "$base 执行返回非零退出码：$rc"
-        return $rc
+    # ① 传输 SQL 到容器，并【验证确实到位】
+    #   两个坑都要防：
+    #     a) 宿主路径必须是 Windows 形式，否则 docker cp 失败（见 win_path 说明）
+    #     b) 必须删掉容器内旧文件，否则 cp 失败时残留的旧文件会让 test -f 通过，
+    #        导致「看起来成功、实际执行的是上次的 SQL」—— 比直接报错更危险
+    local src_path
+    src_path="$(win_path "$f")"
+    # docker cp 写入的文件属 root，删除需用 root 身份，否则 rm 会静默失败
+    docker exec -u root "$HIVE_CONTAINER" rm -f "/tmp/$base" 2>/dev/null || true
+
+    if ! docker cp "$src_path" "$HIVE_CONTAINER:/tmp/$base" >/dev/null 2>&1 \
+       || ! docker exec "$HIVE_CONTAINER" test -s "/tmp/$base" 2>/dev/null; then
+        err "SQL 文件传输到容器失败：$base"
+        err "  源路径：$src_path"
+        err "请检查该文件是否存在、容器 $HIVE_CONTAINER 是否正常"
+        return 1
+    fi
+
+    # ② 执行并把输出写入日志文件
+    docker exec "$HIVE_CONTAINER" \
+        beeline -u "$HIVE_JDBC" --silent=true --force=true -f "/tmp/$base" 2>&1 \
+        | tee "$log_file"
+    local rc=${PIPESTATUS[0]}
+
+    # ③ 双重判定：退出码 + 日志中的 Error
+    #   注意：--force=true 会让 beeline 忽略 SQL 错误并返回 0，
+    #   所以只看退出码会漏掉真正的 SQL 报错，必须同时扫描日志。
+    local sql_err
+    sql_err="$(grep -i -E "^Error|FAILED:|SemanticException|does not exist" "$log_file" \
+               | grep -v "Failed to create directory" | head -5)"
+
+    if [ $rc -ne 0 ] || [ -n "$sql_err" ]; then
+        err "$base 执行失败（退出码 $rc）"
+        if [ -n "$sql_err" ]; then
+            err "错误详情："
+            echo "$sql_err" | sed 's/^/    /' >&2
+        fi
+        err "完整日志：$log_file"
+        return 1
     fi
     log "$base 完成"
     echo
@@ -122,7 +180,8 @@ fix_charset() {
         warn "未找到 $f，跳过（中文注释可能显示为 ?）"
         return 0
     fi
-    docker cp "$f" "$MYSQL_CONTAINER:/tmp/fix_charset.sql" >/dev/null 2>&1
+    # 用 stdin 重定向把脚本喂给容器内的 mysql，避免 docker cp 的路径转换问题；
+    # 密码通过 MYSQL_PWD 环境变量传递，不出现在命令行里。
     if docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" "$MYSQL_CONTAINER" \
             mysql -uroot < "$f" >/dev/null 2>&1; then
         log "字符集修复完成"
@@ -133,19 +192,19 @@ fix_charset() {
 
 run_ods() {
     log "========== 阶段 1/2：ODS 贴源层 =========="
-    fix_charset
-    run_sql "$SCRIPT_DIR/sql/ods/01_create_database.sql"
-    run_sql "$SCRIPT_DIR/sql/ods/02_create_ods_tables.sql"
-    run_sql "$SCRIPT_DIR/sql/ods/03_load_ods_data.sql"
-    run_sql "$SCRIPT_DIR/sql/quality/01_quality_assessment.sql"
+    fix_charset || exit 1
+    run_sql "$SCRIPT_DIR/sql/ods/01_create_database.sql"        || exit 1
+    run_sql "$SCRIPT_DIR/sql/ods/02_create_ods_tables.sql"      || exit 1
+    run_sql "$SCRIPT_DIR/sql/ods/03_load_ods_data.sql"          || exit 1
+    run_sql "$SCRIPT_DIR/sql/quality/01_quality_assessment.sql" || exit 1
 }
 
 run_clean() {
     log "========== 阶段 2/2：DWD 明细层与数据清洗 =========="
-    run_sql "$SCRIPT_DIR/sql/clean/01_create_dwd_tables.sql"
-    run_sql "$SCRIPT_DIR/sql/clean/02_handle_missing_values.sql"
-    run_sql "$SCRIPT_DIR/sql/clean/03_deduplicate_orders.sql"
-    run_sql "$SCRIPT_DIR/sql/clean/04_cleaning_summary.sql"
+    run_sql "$SCRIPT_DIR/sql/clean/01_create_dwd_tables.sql"        || exit 1
+    run_sql "$SCRIPT_DIR/sql/clean/02_handle_missing_values.sql"    || exit 1
+    run_sql "$SCRIPT_DIR/sql/clean/03_deduplicate_orders.sql"       || exit 1
+    run_sql "$SCRIPT_DIR/sql/clean/04_cleaning_summary.sql"         || exit 1
 }
 
 # ------------------------------------------------------------------ main ----
