@@ -117,7 +117,8 @@
 │   │   └── 12_quality_compare.sql          第2周：清洗前后质量对比
 │   ├── dwd/                   第2周：DWD 建模与分析
 │   │   ├── 01_dim_date.sql                 日期维度生成
-│   │   └── 02_eda.sql                      探索性分析
+│   │   ├── 02_eda.sql                      探索性分析
+│   │   └── 03_bucket_experiment.sql        分桶表实验（演示级，不进主链路）
 │   └── fix/                   环境修复脚本
 │       └── fix_metastore_charset.sql
 ├── scripts/
