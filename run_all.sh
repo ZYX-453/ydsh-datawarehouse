@@ -4,9 +4,11 @@
 # -----------------------------------------------------------------------------
 # 用途：按依赖顺序执行 ODS 建库 → 建表 → 导入 → 质量评估 → DWD 建表 → 清洗 → 汇总
 # 用法：
-#   ./run_all.sh                 # 执行完整流程
+#   ./run_all.sh                 # 执行完整流程（第 1 周 + 第 2 周）
 #   ./run_all.sh ods             # 只执行 ODS 层
-#   ./run_all.sh clean           # 只执行清洗层（前提：ODS 已就绪）
+#   ./run_all.sh clean           # 只执行第 1 周清洗层（前提：ODS 已就绪）
+#   ./run_all.sh week2           # 只执行第 2 周：重建 DWD + 清洗进阶 + 质量对比 + EDA
+#   ./run_all.sh eda             # 只执行第 2 周探索性分析
 #
 # 环境变量：
 #   HIVE_CONTAINER  默认 hive-server
@@ -232,11 +234,34 @@ run_ods() {
 }
 
 run_clean() {
-    log "========== 阶段 2/2：DWD 明细层与数据清洗 =========="
+    log "========== 阶段 2/4：DWD 明细层与数据清洗（第 1 周）=========="
     run_sql "$SCRIPT_DIR/sql/clean/01_create_dwd_tables.sql"        || exit 1
     run_sql "$SCRIPT_DIR/sql/clean/02_handle_missing_values.sql"    || exit 1
     run_sql "$SCRIPT_DIR/sql/clean/03_deduplicate_orders.sql"       || exit 1
     run_sql "$SCRIPT_DIR/sql/clean/04_cleaning_summary.sql"         || exit 1
+}
+
+# ---------------------------------------------------- 第 2 周：清洗进阶 ----
+# 注意顺序：05 必须先跑（重建表 + 初始化码表），12 必须最后跑（依赖全部清洗结果）。
+# 第 1 周的 dwd_user / dwd_product 会被本阶段重建为 dim_user / dim_product，
+# 属于有意的结构重构（详见 docs/07_数仓架构设计.md 第八节）。
+run_clean2() {
+    log "========== 阶段 3/4：DWD 重建与清洗进阶（第 2 周）=========="
+    run_sql "$SCRIPT_DIR/sql/clean/05_rebuild_dwd_tables.sql"   || exit 1
+    run_sql "$SCRIPT_DIR/sql/clean/06_clean_dim_user.sql"       || exit 1
+    run_sql "$SCRIPT_DIR/sql/clean/07_clean_dim_product.sql"    || exit 1
+    run_sql "$SCRIPT_DIR/sql/clean/08_clean_dim_store.sql"      || exit 1
+    run_sql "$SCRIPT_DIR/sql/clean/09_clean_dwd_order.sql"      || exit 1
+    run_sql "$SCRIPT_DIR/sql/clean/10_clean_dwd_order_item.sql" || exit 1
+    run_sql "$SCRIPT_DIR/sql/clean/11_clean_dwd_behavior.sql"   || exit 1
+    run_sql "$SCRIPT_DIR/sql/clean/12_quality_compare.sql"      || exit 1
+    run_sql "$SCRIPT_DIR/sql/dwd/01_dim_date.sql"               || exit 1
+}
+
+# ---------------------------------------------------- 第 2 周：探索分析 ----
+run_eda() {
+    log "========== 阶段 4/4：探索性分析（第 2 周）=========="
+    run_sql "$SCRIPT_DIR/sql/dwd/02_eda.sql" || exit 1
 }
 
 # ------------------------------------------------------------------ main ----
@@ -250,9 +275,11 @@ esac
 case "$STAGE" in
     ods)   run_ods ;;
     clean) run_clean ;;
-    all)   run_ods; run_clean ;;
+    week2) run_clean2; run_eda ;;
+    eda)   run_eda ;;
+    all)   run_ods; run_clean; run_clean2; run_eda ;;
     *)
-        err "未知参数：$STAGE（可选：all / ods / clean）"
+        err "未知参数：$STAGE（可选：all / ods / clean / week2 / eda）"
         exit 1
         ;;
 esac
@@ -260,6 +287,6 @@ esac
 log "全部执行完毕。"
 log "结果核对要点："
 echo "  · ODS 行数：1000 / 600 / 60 / 15600 / 37549 / 60000"
-echo "  · DWD 行数：1000 / 600 / 15000（订单去重后）"
-echo "  · BOM 与 CRLF 残留检查结果应为 0"
-echo "  · 明细表孤儿订单数应为 0"
+echo "  · DWD 维度：dim_user 1000 / dim_product 600 / dim_store 60 / dim_date 366"
+echo "  · DWD 事实：dwd_order 15000（12 分区）/ dwd_order_item 37549 / dwd_user_behavior 60000"
+echo "  · 质量对比：quality_compare 共 18 行，修复率应全部为 100"

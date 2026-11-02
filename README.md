@@ -102,21 +102,37 @@
 │   │   └── 03_load_ods_data.sql
 │   ├── quality/               数据质量预评估脚本
 │   │   └── 01_quality_assessment.sql
-│   ├── clean/                 数据清洗脚本（缺失值 / 去重）
-│   │   ├── 01_create_dwd_tables.sql
-│   │   ├── 02_handle_missing_values.sql
-│   │   ├── 03_deduplicate_orders.sql
-│   │   └── 04_cleaning_summary.sql
+│   ├── clean/                 数据清洗脚本
+│   │   ├── 01_create_dwd_tables.sql        第1周：建 DWD 表
+│   │   ├── 02_handle_missing_values.sql    第1周：缺失值处理
+│   │   ├── 03_deduplicate_orders.sql       第1周：订单去重
+│   │   ├── 04_cleaning_summary.sql         第1周：清洗汇总
+│   │   ├── 05_rebuild_dwd_tables.sql       第2周：重建 DWD + 码表维度
+│   │   ├── 06_clean_dim_user.sql           第2周：用户维度清洗
+│   │   ├── 07_clean_dim_product.sql        第2周：商品维度清洗
+│   │   ├── 08_clean_dim_store.sql          第2周：门店维度清洗
+│   │   ├── 09_clean_dwd_order.sql          第2周：订单事实表清洗（按月分区）
+│   │   ├── 10_clean_dwd_order_item.sql     第2周：订单明细清洗
+│   │   ├── 11_clean_dwd_behavior.sql       第2周：用户行为清洗
+│   │   └── 12_quality_compare.sql          第2周：清洗前后质量对比
+│   ├── dwd/                   第2周：DWD 建模与分析
+│   │   ├── 01_dim_date.sql                 日期维度生成
+│   │   └── 02_eda.sql                      探索性分析
 │   └── fix/                   环境修复脚本
 │       └── fix_metastore_charset.sql
 ├── scripts/
-│   └── prepare_data.py        数据预处理（CRLF→LF、去 BOM、校验）
+│   ├── prepare_data.py        数据预处理（CRLF→LF、去 BOM、校验）
+│   └── build_quality_xlsx.py  质量评估表 xlsx 生成
 ├── docs/                      项目文档
 │   ├── 01_环境搭建笔记.md
 │   ├── 02_数据质量预评估表.md
 │   ├── 03_数据清洗说明.md
 │   ├── 04_Docker环境部署.md
-│   └── 05_Git远程仓库配置.md
+│   ├── 05_Git远程仓库配置.md
+│   ├── 06_数据质量清洗报告.md      第2周交付
+│   ├── 07_数仓架构设计.md          第2周交付
+│   ├── 08_探索性分析简报.md        第2周交付
+│   └── images/                     截图与架构图
 ├── run_all.sh                 一键执行脚本
 └── 模拟数据/                  原始数据集（不纳入版本库）
 ```
@@ -128,8 +144,8 @@
 | 周期 | 主题 | 核心任务 | 状态 |
 |---|---|---|---|
 | 第 1 周 | 项目启动 · 环境搭建 · 数据导入与清洗（一） | Docker/Hive/MySQL 环境、Git 规范、ODS 导入、五维预评估、缺失值与重复值处理 | **已完成** |
-| 第 2 周 | 维度建模 · DWD/DWS 建设 | 维度建模、ETL 全流程、异常值与格式统一清洗 | 待启动 |
-| 第 3 周 | ADS 指标 · 分析与预测 | KPI 指标计算、探索性分析、时间序列预测 | 待启动 |
+| 第 2 周 | 清洗进阶 · 四层建模 · 探索性分析 | 枚举标准化、异常值/格式统一、质量对比报告、星型模型、分区表、EDA | **已完成** |
+| 第 3 周 | ADS 指标 · 分析与预测 | KPI 指标计算、时间序列预测、DWS 汇总层建设 | 待启动 |
 | 第 4 周 | 智能应用 · 可视化 · 部署 | NL2SQL、Superset 仪表板、ECharts 大屏、Docker 一键部署 | 待启动 |
 
 ---
