@@ -99,6 +99,16 @@ services:
     container_name: hive-server
     restart: unless-stopped
     hostname: hive-server
+    # 【为什么覆盖 entrypoint】—— 规避 HiveServer2 无限重启死锁
+    #   /opt/hive/bin/ext/hiveserver2.sh 的 before_start() 会检查
+    #   $HIVE_CONF_DIR/hiveserver2.pid：只要该文件存在且 kill -0 <pid> 成功，
+    #   就判定"HS2 已在运行"并 exit 1。
+    #   容器重启时 PID 命名空间重建，启动脚本自身恰好又落在 PID 7，
+    #   与残留 pid 文件里记录的 7 撞上 → 每次都认为已在运行 → 无限重启，
+    #   日志固定为 "HiveServer2 running as process 7.  Stop it first."。
+    #   （metastore 的 ext/metastore.sh 没有这段检测，不受影响。）
+    #   启动前先删掉陈旧 pid 文件，从根上消除该死锁。
+    entrypoint: ["sh", "-c", "rm -f /opt/hive/conf/hiveserver2.pid; exec /entrypoint.sh"]
     environment:
       SERVICE_NAME: hiveserver2
       IS_RESUME: "true"
