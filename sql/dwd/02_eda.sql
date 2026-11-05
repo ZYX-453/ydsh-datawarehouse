@@ -7,7 +7,7 @@
 -- 【GMV 口径】
 --   只统计 is_gmv_included = 1 的订单（已支付 / 已完成）。
 --   待支付、已取消、退款中不计入 —— 若直接 sum(pay_amount) 会虚增 GMV。
---   该口径来自 dim_order_status.is_gmv_included，是显式建模的结果，不是硬编码。
+--   该口径来自 dim_order_status.is_gmv_included，ETL 时一并写入事实表，是显式建模的结果，不是硬编码。
 --
 -- 【两个已踩过的坑，写在这里避免重犯】
 --   ① round(double, int) 写入 ORC 表会变成 NULL（本镜像 Hive 4 的问题），

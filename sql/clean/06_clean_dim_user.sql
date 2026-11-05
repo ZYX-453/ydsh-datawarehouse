@@ -2,11 +2,11 @@
 -- 第 2 周 步骤 2：dim_user 用户维度清洗
 -- ----------------------------------------------------------------------------
 -- 文件 : sql/clean/06_clean_dim_user.sql
--- 依赖 : 05_rebuild_dwd_tables.sql（dim_user / dim_member_level 已建）
+-- 依赖 : 05_rebuild_dwd_tables.sql（dim_user / map_member_level 已建）
 --
 -- 处理清单：
 --   ① gender        ：男/M/male → 男；女/F/female → 女；其余（含空）→ 未知
---   ② member_level  ：12 种取值 → 4 个标准值，通过 JOIN dim_member_level 完成
+--   ② member_level  ：12 种取值 → 4 个标准值，通过 JOIN map_member_level 完成
 --   ③ age           ：≤0 或 ≥150 视为异常 → 置空 → 用有效年龄中位数填充
 --   ④ register_date ：yyyy-MM-dd / yyyy/MM/dd / yyyyMMdd → 统一 yyyy-MM-dd
 --   ⑤ phone         ：去连字符 → 11 位纯数字，仍不合规的置空
@@ -73,7 +73,7 @@ JOIN (
     FROM ydsh_ods.ods_user
     WHERE age > 0 AND age < 150
 ) m ON 1 = 1
-LEFT JOIN dim_member_level ml
+LEFT JOIN map_member_level ml
     ON lower(b.member_level_raw) = ml.src_value;
 
 -- ---------------------------------------------------------------- 校验 ----

@@ -6,8 +6,8 @@
 --
 -- 处理清单：
 --   ① 重复订单：order_id 去重，15600 → 15000（保留每个 order_id 的首条）
---   ② order_status ：12 种取值 → 5 标准值，通过 JOIN dim_order_status
---   ③ pay_type     ：7 种取值 → 4 标准值，通过 JOIN dim_pay_type
+--   ② order_status ：12 种取值 → 5 标准值，通过 JOIN map_order_status
+--   ③ pay_type     ：7 种取值 → 4 标准值，通过 JOIN map_pay_type
 --   ④ channel      ：6 种取值（含大小写） → 4 标准值
 --   ⑤ pay_amount   ：负数取绝对值；> 100000 置空（实测 310 负 + 312 超大）
 --   ⑥ order_date   ：yyyy/M/d（非补零斜杠） → yyyy-MM-dd
@@ -196,8 +196,8 @@ SELECT
     END AS amt_fix_flag,
     substr(a.order_date_std, 1, 7)                          AS order_ym
 FROM stg_a_order a
-LEFT JOIN dim_pay_type pt      ON a.pay_type_l = pt.src_value
-LEFT JOIN dim_order_status st  ON a.status_l   = st.src_value;
+LEFT JOIN map_pay_type pt      ON a.pay_type_l = pt.src_value
+LEFT JOIN map_order_status st  ON a.status_l   = st.src_value;
 
 -- ============ 第 4 段：写入分区事实表 ============
 INSERT OVERWRITE TABLE dwd_order PARTITION (order_ym)

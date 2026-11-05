@@ -24,7 +24,8 @@
 --
 -- 【表清单】
 --   维度表：dim_user / dim_product / dim_store / dim_date
---   码表维度：dim_member_level / dim_pay_type / dim_order_status
+--          + 三个枚举维度 dim_member_level / dim_pay_type / dim_order_status（主键=中文名，唯一）
+--   映射表：map_member_level / map_pay_type / map_order_status（主键=src_value，仅 ETL 使用）
 --   事实表：dwd_order（按年月分区） / dwd_order_item / dwd_user_behavior（按年月分区）
 -- ============================================================================
 
@@ -49,27 +50,41 @@ DROP TABLE IF EXISTS dim_date;
 DROP TABLE IF EXISTS dim_member_level;
 DROP TABLE IF EXISTS dim_pay_type;
 DROP TABLE IF EXISTS dim_order_status;
+DROP TABLE IF EXISTS map_member_level;
+DROP TABLE IF EXISTS map_pay_type;
+DROP TABLE IF EXISTS map_order_status;
 DROP TABLE IF EXISTS dwd_order_item;
 DROP TABLE IF EXISTS dwd_user_behavior;
 
 -- ===========================================================================
--- 一、码表维度（枚举取值标准化用）
--- ===========================================================================
+-- 一、枚举映射表与枚举维度表（两者分离，不可混用）
+-- ---------------------------------------------------------------------------
+-- 【第 2 周验收修正 · 为什么要拆】
+--   原设计把「源值映射」与「维度」压在同一个 dim_* 表里：
+--   dim_order_status 12 行中只有 5 个 status_name（已完成 / 已支付各 3 行），
+--   dim_pay_type 9 行中只有 4 个 pay_name（微信支付 3 行）。
+--   而事实表存的是中文名。按星型模型 join on status_name 时，
+--   一条事实会被匹配 3 次 —— 实测 GMV 由 24,717,464.96 膨胀到 74,152,394.88（整 3 倍）。
+--
+--   维度表的主键必须唯一，因此拆成两类：
+--     map_*  —— 映射表，主键 src_value（唯一），只服务 ETL，不进入星型模型
+--     dim_*  —— 维度表，主键为中文名（唯一），供事实表 / 报表安全关联
+--   事实表字段与数据均不变，无需重刷。
+-- ---------------------------------------------------------------------------
 
--- 1.1 会员等级维度
---     src_value 存「脏值原样（已 lower+trim）」，通过 JOIN 完成编码→中文名称转换
-CREATE TABLE dim_member_level (
+-- 1.1 会员等级：映射表（12 种源值）+ 维度表（4 个标准等级）
+CREATE TABLE map_member_level (
     src_value      STRING COMMENT '源取值（小写去空格后的脏值）',
     level_name     STRING COMMENT '标准等级名称',
     level_code     STRING COMMENT '等级编码',
     level_rank     INT    COMMENT '等级序号，1 最低',
     discount_rate  DOUBLE COMMENT '该等级默认折扣率'
 )
-COMMENT '会员等级码表维度'
+COMMENT '会员等级源值映射表（ETL 专用，主键 src_value）'
 STORED AS ORC
 TBLPROPERTIES ('orc.compress' = 'SNAPPY');
 
-INSERT INTO dim_member_level VALUES
+INSERT INTO map_member_level VALUES
 ('普通会员', '普通会员', 'L1', 1, 1.00),
 ('普通',     '普通会员', 'L1', 1, 1.00),
 ('normal',   '普通会员', 'L1', 1, 1.00),
@@ -83,18 +98,34 @@ INSERT INTO dim_member_level VALUES
 ('钻石',     '钻石会员', 'L4', 4, 0.90),
 ('diamond',  '钻石会员', 'L4', 4, 0.90);
 
--- 1.2 支付方式维度
-CREATE TABLE dim_pay_type (
+CREATE TABLE dim_member_level (
+    level_name     STRING COMMENT '标准等级名称（主键）',
+    level_code     STRING COMMENT '等级编码',
+    level_rank     INT    COMMENT '等级序号，1 最低',
+    discount_rate  DOUBLE COMMENT '该等级默认折扣率'
+)
+COMMENT '会员等级维度表（主键 level_name，一名一行）'
+STORED AS ORC
+TBLPROPERTIES ('orc.compress' = 'SNAPPY');
+
+INSERT INTO dim_member_level VALUES
+('普通会员', 'L1', 1, 1.00),
+('银卡会员', 'L2', 2, 0.98),
+('金卡会员', 'L3', 3, 0.95),
+('钻石会员', 'L4', 4, 0.90);
+
+-- 1.2 支付方式：映射表（9 种源值）+ 维度表（4 个标准值）
+CREATE TABLE map_pay_type (
     src_value  STRING COMMENT '源取值（小写去空格）',
     pay_name   STRING COMMENT '标准支付方式',
     pay_code   STRING COMMENT '支付方式编码',
     is_online  INT    COMMENT '是否线上支付：1=是 0=否'
 )
-COMMENT '支付方式码表维度'
+COMMENT '支付方式源值映射表（ETL 专用，主键 src_value）'
 STORED AS ORC
 TBLPROPERTIES ('orc.compress' = 'SNAPPY');
 
-INSERT INTO dim_pay_type VALUES
+INSERT INTO map_pay_type VALUES
 ('支付宝',   '支付宝',   'ALIPAY', 1),
 ('alipay',   '支付宝',   'ALIPAY', 1),
 ('微信支付', '微信支付', 'WECHAT', 1),
@@ -105,21 +136,36 @@ INSERT INTO dim_pay_type VALUES
 ('货到付款', '货到付款', 'COD',    0),
 ('cod',      '货到付款', 'COD',    0);
 
--- 1.3 订单状态维度
+CREATE TABLE dim_pay_type (
+    pay_name   STRING COMMENT '标准支付方式（主键）',
+    pay_code   STRING COMMENT '支付方式编码',
+    is_online  INT    COMMENT '是否线上支付：1=是 0=否'
+)
+COMMENT '支付方式维度表（主键 pay_name，一名一行）'
+STORED AS ORC
+TBLPROPERTIES ('orc.compress' = 'SNAPPY');
+
+INSERT INTO dim_pay_type VALUES
+('支付宝',   'ALIPAY', 1),
+('微信支付', 'WECHAT', 1),
+('银行卡',   'BANK',   1),
+('货到付款', 'COD',    0);
+
+-- 1.3 订单状态：映射表（12 种源值）+ 维度表（5 个标准状态）
 --     is_gmv_included 是 GMV 口径的关键：已取消 / 退款中 / 待支付 不计入 GMV。
 --     任务书手册未定义该口径，直接 sum(pay_amount) 会虚增 GMV，此处显式建模。
-CREATE TABLE dim_order_status (
+CREATE TABLE map_order_status (
     src_value       STRING COMMENT '源取值（小写去空格）',
     status_name     STRING COMMENT '标准状态名称',
     status_code     STRING COMMENT '状态编码',
     is_gmv_included INT    COMMENT '是否计入 GMV：1=计入 0=不计入',
     is_final        INT    COMMENT '是否为终态：1=终态 0=流转中'
 )
-COMMENT '订单状态码表维度'
+COMMENT '订单状态源值映射表（ETL 专用，主键 src_value）'
 STORED AS ORC
 TBLPROPERTIES ('orc.compress' = 'SNAPPY');
 
-INSERT INTO dim_order_status VALUES
+INSERT INTO map_order_status VALUES
 ('待支付',  '待支付', 'PENDING',   0, 0),
 ('1',        '待支付', 'PENDING',   0, 0),
 ('已支付',  '已支付', 'PAID',      1, 0),
@@ -132,6 +178,23 @@ INSERT INTO dim_order_status VALUES
 ('cancelled','已取消', 'CANCELLED', 0, 1),
 ('4',        '已取消', 'CANCELLED', 0, 1),
 ('退款中',  '退款中', 'REFUNDING', 0, 0);
+
+CREATE TABLE dim_order_status (
+    status_name     STRING COMMENT '标准状态名称（主键）',
+    status_code     STRING COMMENT '状态编码',
+    is_gmv_included INT    COMMENT '是否计入 GMV：1=计入 0=不计入',
+    is_final        INT    COMMENT '是否为终态：1=终态 0=流转中'
+)
+COMMENT '订单状态维度表（主键 status_name，一名一行）'
+STORED AS ORC
+TBLPROPERTIES ('orc.compress' = 'SNAPPY');
+
+INSERT INTO dim_order_status VALUES
+('待支付', 'PENDING',   0, 0),
+('已支付', 'PAID',      1, 0),
+('已完成', 'COMPLETED', 1, 1),
+('已取消', 'CANCELLED', 0, 1),
+('退款中', 'REFUNDING', 0, 0);
 
 -- ===========================================================================
 -- 二、业务维度表
