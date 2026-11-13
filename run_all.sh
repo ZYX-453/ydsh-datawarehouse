@@ -9,10 +9,17 @@
 #   ./run_all.sh clean           # 只执行第 1 周清洗层（前提：ODS 已就绪）
 #   ./run_all.sh week2           # 只执行第 2 周：重建 DWD + 清洗进阶 + 质量对比 + EDA
 #   ./run_all.sh eda             # 只执行第 2 周探索性分析
+#   ./run_all.sh week3           # 只执行第 3 周：DWS 汇总层 + ADS 应用层（前提：DWD 已就绪）
+#   ./run_all.sh dws             # 只执行 DWS 汇总层
+#   ./run_all.sh ads             # 只执行 ADS 应用层
+#   ./run_all.sh ml              # 时间序列抽取 + 预测建模（前提：ADS 已就绪，需 Python 依赖）
+#   ./run_all.sh ai              # Schema 抽取 + AI 洞察 + NL2SQL（无密钥自动走离线兜底）
+#   ./run_all.sh week3all        # 第 3 周全部：DWS + ADS + 预测建模 + AI
 #
 # 环境变量：
 #   HIVE_CONTAINER  默认 hive-server
 #   HIVE_JDBC       默认 jdbc:hive2://localhost:10000
+#   PYTHON_BIN      执行 Python 阶段用的解释器，默认 python（建议指向装了依赖的虚拟环境）
 # =============================================================================
 
 set -uo pipefail
@@ -268,6 +275,65 @@ run_eda() {
     run_sql "$SCRIPT_DIR/sql/dwd/03_bucket_experiment.sql" || warn "分桶实验未通过，不影响主链路"
 }
 
+# ------------------------------------------- 第 3 周：DWS 汇总层 ----
+# 依赖：DWD 全层已就绪（第 2 周产物）。DWS 只读 DWD，不跨层读 ODS。
+# 顺序：01 建表 → 02~06 逐表加载；06 用户表依赖 dwd_order + dim_user。
+run_dws() {
+    log "========== 阶段 5/7：DWS 汇总层（第 3 周）=========="
+    run_sql "$SCRIPT_DIR/sql/dws/01_create_dws_tables.sql"       || exit 1
+    run_sql "$SCRIPT_DIR/sql/dws/02_load_dws_trade_day.sql"      || exit 1
+    run_sql "$SCRIPT_DIR/sql/dws/03_load_dws_store_month.sql"    || exit 1
+    run_sql "$SCRIPT_DIR/sql/dws/04_load_dws_product_month.sql"  || exit 1
+    run_sql "$SCRIPT_DIR/sql/dws/05_load_dws_trade_week.sql"     || exit 1
+    run_sql "$SCRIPT_DIR/sql/dws/06_load_dws_user_agg.sql"       || exit 1
+}
+
+# ------------------------------------------- 第 3 周：ADS 应用层 ----
+# 依赖：DWS 全层已就绪。ADS 允许冗余与固化口径，供 BI / NL2SQL 直接消费。
+run_ads() {
+    log "========== 阶段 6/7：ADS 应用层（第 3 周）=========="
+    run_sql "$SCRIPT_DIR/sql/ads/01_create_ads_tables.sql"       || exit 1
+    run_sql "$SCRIPT_DIR/sql/ads/02_load_ads_kpi.sql"            || exit 1
+    run_sql "$SCRIPT_DIR/sql/ads/03_load_ads_category.sql"       || exit 1
+    run_sql "$SCRIPT_DIR/sql/ads/04_load_ads_region.sql"         || exit 1
+    run_sql "$SCRIPT_DIR/sql/ads/05_load_ads_user_value.sql"     || exit 1
+    run_sql "$SCRIPT_DIR/sql/ads/06_load_ads_funnel_daily.sql"   || exit 1
+}
+
+# ------------------------------------------- 第 3 周：Python 分析层 ----
+# 依赖：ADS 全层已就绪（01 从 ads_sales_daily 取数）。
+# Python 依赖装在独立虚拟环境，用 PYTHON_BIN 指定解释器，不污染系统 Python：
+#   PYTHON_BIN=.../envs/ydsh/Scripts/python.exe ./run_all.sh ml
+require_python() {
+    PY="${PYTHON_BIN:-python}"
+    command -v "$PY" >/dev/null 2>&1 || {
+        err "找不到 Python 解释器：$PY"
+        err "请用 PYTHON_BIN=/path/to/python 指定（依赖见 python/README 或 requirements）"
+        exit 1
+    }
+    "$PY" -c "import pandas, sklearn" 2>/dev/null || {
+        err "$PY 缺少 pandas / scikit-learn，请先 pip install -r requirements.txt"
+        exit 1
+    }
+}
+
+run_py_series() {
+    log "========== 阶段 7/8：时间序列抽取与预测建模（第 3 周）=========="
+    require_python
+    ( cd "$SCRIPT_DIR/python" && "$PY" 01_extract_series.py ) || exit 1
+    ( cd "$SCRIPT_DIR/python" && "$PY" 02_predict_gmv.py ) || exit 1
+}
+
+run_py_ai() {
+    log "========== 阶段 8/8：Schema 抽取 / AI 洞察 / NL2SQL（第 3 周）=========="
+    require_python
+    ( cd "$SCRIPT_DIR/python" && "$PY" 03_schema_extract.py ) || exit 1
+    # 07 无密钥时用规则模板生成同结构报告，并在文首标注生成方式
+    ( cd "$SCRIPT_DIR/python" && "$PY" 07_ai_insight.py ) || exit 1
+    # 05 无密钥时走离线兜底；个别题未通过只告警不阻断（明细落 CSV）
+    ( cd "$SCRIPT_DIR/python" && "$PY" 05_nl2sql.py ) || warn "NL2SQL 有未通过题目，见 output/nl2sql_results_*.csv"
+}
+
 # ------------------------------------------------------------------ main ----
 precheck
 
@@ -281,9 +347,15 @@ case "$STAGE" in
     clean) run_clean ;;
     week2) run_clean2; run_eda ;;
     eda)   run_eda ;;
-    all)   run_ods; run_clean; run_clean2; run_eda ;;
+    week3) run_dws; run_ads ;;
+    week3all) run_dws; run_ads; run_py_series; run_py_ai ;;
+    dws)   run_dws ;;
+    ads)   run_ads ;;
+    ml)    run_py_series ;;
+    ai)    run_py_ai ;;
+    all)   run_ods; run_clean; run_clean2; run_eda; run_dws; run_ads ;;
     *)
-        err "未知参数：$STAGE（可选：all / ods / clean / week2 / eda）"
+        err "未知参数：$STAGE（可选：all / ods / clean / week2 / eda / week3 / week3all / dws / ads / ml / ai）"
         exit 1
         ;;
 esac
@@ -293,4 +365,6 @@ log "结果核对要点："
 echo "  · ODS 行数：1000 / 600 / 60 / 15600 / 37549 / 60000"
 echo "  · DWD 维度：dim_user 1000 / dim_product 600 / dim_store 60 / dim_date 366"
 echo "  · DWD 事实：dwd_order 15000（12 分区）/ dwd_order_item 37549 / dwd_user_behavior 60000"
+echo "  · DWS 汇总：trade_day 1463 / trade_week 212 / store_month 720 / product_month 6993 / user_agg 1000"
+echo "  · ADS 指标：GMV 24717464.96 / 订单 9992 / 客单价 2473.73（各表合计应一致）"
 echo "  · 质量对比：quality_compare 共 18 行，修复率应全部为 100"
