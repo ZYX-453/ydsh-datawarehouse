@@ -3,6 +3,7 @@
 **ads_behavior_funnel**（库 ydsh_ads）— 无表注释
   - step int  漏斗层级 1=浏览 2=收藏 3=加购 4=购买
   - behavior_type string  行为类型 pv/fav/cart/buy
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'buy'、'cart'、'fav'、'pv'
   - event_cnt bigint  行为事件数
   - user_cnt bigint  涉及用户数
   - event_share double  事件占比（相对浏览）
@@ -10,6 +11,7 @@
 **ads_category_rank**（库 ydsh_ads）— 无表注释
   - rk int  销售额排名
   - category string  一级类目
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'运动户外'、'数码家电'、'服饰鞋包'、'图书文娱'、'食品生鲜'、'家居生活'、'美妆个护'、'母婴玩具'
   - sales_amt double  销售额（订单实付按明细占比分摊后归集）
   - sales_share double  销售额占比
   - order_cnt bigint  涉及订单数
@@ -19,6 +21,7 @@
 
 **ads_kpi_month**（库 ydsh_ads）— 无表注释
   - stat_ym string  统计年月 yyyy-MM
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'2024-01'、'2024-02'、'2024-03'、'2024-04'、'2024-05'、'2024-06'、'2024-07'、'2024-08'、'2024-09'、'2024-10'、'2024-11'、'2024-12'
   - gmv double  GMV
   - order_cnt bigint  订单量
   - aov double  客单价
@@ -29,6 +32,7 @@
 
 **ads_kpi_overview**（库 ydsh_ads）— 无表注释
   - stat_scope string  统计口径范围，如 2024 全年
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'2024 全年（成交口径）'
   - gmv double  GMV 成交总额
   - order_cnt bigint  订单量（去重）
   - aov double  客单价 = gmv / order_cnt
@@ -63,15 +67,20 @@
 **ads_store_top10**（库 ydsh_ads）— 无表注释
   - rk int  GMV 排名
   - store_id string  门店编号
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'S029'、'S012'、'S056'、'S031'、'S009'、'S025'、'S028'、'S002'、'S037'、'S015'
   - store_name string  门店名称
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'云购生活·青岛二店'、'云购生活·北京二店'、'云购生活·绍兴旗舰店'、'云购生活·开封社区店'、'云购生活·嘉兴社区店'、'云购生活·莆田旗舰店'、'云购生活·苏州旗舰店'、'云购生活·合肥购物中心店'、'云购生活·南通社区店'
   - province string  省份
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'浙江省'、'江苏省'、'山东省'、'北京市'、'河南省'、'福建省'、'安徽省'
   - city string  城市
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'青岛'、'北京'、'绍兴'、'开封'、'嘉兴'、'莆田'、'苏州'、'合肥'、'南通'
   - gmv double  GMV
   - order_cnt bigint  订单量
   - aov double  客单价
 
 **ads_user_value**（库 ydsh_ads）— 无表注释
   - segment string  RFM 客户分层名称
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'一般价值客户'、'一般保持客户'、'一般发展客户'、'一般挽留客户'、'重要价值客户'、'重要保持客户'、'重要发展客户'、'重要挽留客户'
   - user_cnt bigint  用户数
   - user_share double  用户占比
   - gmv double  该层 GMV
@@ -90,28 +99,36 @@
   - day_of_week int  星期几：1=周一 … 7=周日
   - is_weekend int  是否周末：1=是 0=否
   - year_month string  年月 yyyy-MM
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'2024-01'、'2024-03'、'2024-05'、'2024-07'、'2024-08'、'2024-10'、'2024-12'、'2024-04'、'2024-06'、'2024-09'、'2024-11'、'2024-02'
 
 **dim_member_level**（库 ydsh_dwd）— 无表注释
   - level_name string  标准等级名称（主键）
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'普通会员'、'银卡会员'、'金卡会员'、'钻石会员'
   - level_code string  等级编码
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'L1'、'L2'、'L3'、'L4'
   - level_rank int  等级序号，1 最低
   - discount_rate double  该等级默认折扣率
 
 **dim_order_status**（库 ydsh_dwd）— 无表注释
   - status_name string  标准状态名称（主键）
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'待支付'、'已支付'、'已完成'、'已取消'、'退款中'
   - status_code string  状态编码
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'PENDING'、'PAID'、'COMPLETED'、'CANCELLED'、'REFUNDING'
   - is_gmv_included int  是否计入 GMV：1=计入 0=不计入
   - is_final int  是否为终态：1=终态 0=流转中
 
 **dim_pay_type**（库 ydsh_dwd）— 无表注释
   - pay_name string  标准支付方式（主键）
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'支付宝'、'微信支付'、'银行卡'、'货到付款'
   - pay_code string  支付方式编码
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'ALIPAY'、'WECHAT'、'BANK'、'COD'
   - is_online int  是否线上支付：1=是 0=否
 
 **dim_product**（库 ydsh_dwd）— 无表注释
   - product_id string  商品编号
   - product_name string  商品名称
   - category string  一级类目（已去首尾空格）
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'运动户外'、'数码家电'、'图书文娱'、'服饰鞋包'、'食品生鲜'、'家居生活'、'美妆个护'、'母婴玩具'
   - sub_category string  二级类目（已去首尾空格）
   - brand string  品牌（已统一大小写与空格）
   - price double  售价（负数取绝对值，超大值置空）
@@ -119,6 +136,7 @@
   - cost double  成本价
   - stock int  库存数量
   - status string  状态
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'在售'、'下架'、'缺货'
   - launch_date string  上架日期（已统一 yyyy-MM-dd，缺失已补全）
   - launch_date_is_filled int  上架日期是否为补全值：1=补全 0=原始
 
@@ -128,6 +146,7 @@
   - province string  省份
   - city string  城市
   - district string  区县
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'开发区'、'新区'、'老城区'、'中心区'、'高新区'、'滨江区'
   - address string  详细地址
   - region string  地区（省-市，字段合并）
   - open_date string  开业日期（统一 yyyy-MM-dd）
@@ -138,6 +157,7 @@
   - user_id string  用户编号
   - user_name string  用户姓名
   - gender string  性别（已标准化：男/女/未知）
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'女'、'男'、'未知'
   - age int  年龄（异常值已置空并按中位数填充）
   - age_is_filled int  年龄是否为填充值：1=填充 0=原始
   - city string  城市
@@ -145,6 +165,7 @@
   - region string  地区（省-市，字段合并）
   - register_date string  注册日期（已统一为 yyyy-MM-dd）
   - member_level string  会员等级（已标准化为中文标准值）
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'金卡会员'、'钻石会员'、'普通会员'、'银卡会员'
   - level_rank int  会员等级序号（关联码表得到）
   - phone string  手机号（已统一为 11 位纯数字）
   - email string  邮箱（允许为空）
@@ -213,6 +234,7 @@
   - product_id string  商品编号
   - product_name string  商品名称
   - category string  一级类目
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'运动户外'、'数码家电'、'图书文娱'、'服饰鞋包'、'食品生鲜'、'家居生活'、'美妆个护'、'母婴玩具'
   - sub_category string  二级类目
   - brand string  品牌
   - qty bigint  销售件数
@@ -220,7 +242,9 @@
   - order_cnt bigint  涉及订单数（去重）
   - cost_amt double  成本额 = 件数 × 成本价（用于毛利测算）
   - stat_ym string  统计年月 yyyy-MM
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'2024-01'、'2024-12'、'2024-05'、'2024-10'、'2024-08'、'2024-07'、'2024-11'、'2024-03'、'2024-04'、'2024-09'、'2024-06'、'2024-02'
   - stat_ym string  统计年月 yyyy-MM [分区键]
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'2024-01'、'2024-12'、'2024-05'、'2024-10'、'2024-08'、'2024-07'、'2024-11'、'2024-03'、'2024-04'、'2024-09'、'2024-06'、'2024-02'
 
 **dws_store_month**（库 ydsh_dws）— 无表注释
   - store_id string  门店编号
@@ -232,23 +256,29 @@
   - user_cnt bigint  成交用户数
   - aov double  客单价 = gmv / order_cnt
   - stat_ym string  统计年月 yyyy-MM
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'2024-01'、'2024-02'、'2024-03'、'2024-04'、'2024-05'、'2024-06'、'2024-07'、'2024-08'、'2024-09'、'2024-10'、'2024-11'、'2024-12'
   - stat_ym string  统计年月 yyyy-MM [分区键]
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'2024-01'、'2024-02'、'2024-03'、'2024-04'、'2024-05'、'2024-06'、'2024-07'、'2024-08'、'2024-09'、'2024-10'、'2024-11'、'2024-12'
 
 **dws_trade_day**（库 ydsh_dws）— 无表注释
   - stat_date string  统计日期 yyyy-MM-dd
   - channel string  下单渠道（已标准化）
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'门店'、'APP'、'PC官网'、'小程序'
   - gmv double  成交金额（is_gmv_included=1 的实付金额之和）
   - order_cnt bigint  成交订单数（去重）
   - user_cnt bigint  成交用户数（去重）
   - discount_amt double  优惠金额合计
   - item_qty bigint  成交商品件数（来自订单明细）
   - stat_ym string  统计年月 yyyy-MM
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'2024-03'、'2024-05'、'2024-07'、'2024-08'、'2024-10'、'2024-12'、'2024-01'、'2024-04'、'2024-06'、'2024-09'、'2024-11'、'2024-02'
   - stat_ym string  统计年月 yyyy-MM [分区键]
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'2024-03'、'2024-05'、'2024-07'、'2024-08'、'2024-10'、'2024-12'、'2024-01'、'2024-04'、'2024-06'、'2024-09'、'2024-11'、'2024-02'
 
 **dws_trade_week**（库 ydsh_dws）— 无表注释
   - week_start string  周首日 yyyy-MM-dd（周一）
   - week_end string  周末日 yyyy-MM-dd（周日）
   - channel string  下单渠道
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'APP'、'PC官网'、'小程序'、'门店'
   - gmv double  成交金额
   - order_cnt bigint  成交订单数
   - user_cnt bigint  成交用户数
@@ -258,6 +288,7 @@
   - user_id string  用户编号
   - user_name string  用户姓名
   - member_level string  会员等级（中文标准值）
+      ※ 该列实际取值（必须原样使用，勿改写或简写）：'金卡会员'、'钻石会员'、'普通会员'、'银卡会员'
   - province string  省份
   - city string  城市
   - first_order_date string  首单日期 yyyy-MM-dd

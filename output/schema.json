@@ -29,7 +29,15 @@
         "type": "double",
         "comment": "事件占比（相对浏览）"
       }
-    ]
+    ],
+    "enums": {
+      "behavior_type": [
+        "buy",
+        "cart",
+        "fav",
+        "pv"
+      ]
+    }
   },
   "ydsh_ads.ads_category_rank": {
     "database": "ydsh_ads",
@@ -76,7 +84,19 @@
         "type": "bigint",
         "comment": "在售品牌数"
       }
-    ]
+    ],
+    "enums": {
+      "category": [
+        "运动户外",
+        "数码家电",
+        "服饰鞋包",
+        "图书文娱",
+        "食品生鲜",
+        "家居生活",
+        "美妆个护",
+        "母婴玩具"
+      ]
+    }
   },
   "ydsh_ads.ads_kpi_month": {
     "database": "ydsh_ads",
@@ -123,7 +143,23 @@
         "type": "double",
         "comment": "订单量环比"
       }
-    ]
+    ],
+    "enums": {
+      "stat_ym": [
+        "2024-01",
+        "2024-02",
+        "2024-03",
+        "2024-04",
+        "2024-05",
+        "2024-06",
+        "2024-07",
+        "2024-08",
+        "2024-09",
+        "2024-10",
+        "2024-11",
+        "2024-12"
+      ]
+    }
   },
   "ydsh_ads.ads_kpi_overview": {
     "database": "ydsh_ads",
@@ -190,7 +226,12 @@
         "type": "double",
         "comment": "月均 GMV"
       }
-    ]
+    ],
+    "enums": {
+      "stat_scope": [
+        "2024 全年（成交口径）"
+      ]
+    }
   },
   "ydsh_ads.ads_region_rank": {
     "database": "ydsh_ads",
@@ -237,7 +278,8 @@
         "type": "double",
         "comment": "客单价"
       }
-    ]
+    ],
+    "enums": {}
   },
   "ydsh_ads.ads_sales_daily": {
     "database": "ydsh_ads",
@@ -279,7 +321,8 @@
         "type": "int",
         "comment": "星期几 1=周一 ... 7=周日"
       }
-    ]
+    ],
+    "enums": {}
   },
   "ydsh_ads.ads_store_top10": {
     "database": "ydsh_ads",
@@ -326,7 +369,52 @@
         "type": "double",
         "comment": "客单价"
       }
-    ]
+    ],
+    "enums": {
+      "store_id": [
+        "S029",
+        "S012",
+        "S056",
+        "S031",
+        "S009",
+        "S025",
+        "S028",
+        "S002",
+        "S037",
+        "S015"
+      ],
+      "store_name": [
+        "云购生活·青岛二店",
+        "云购生活·北京二店",
+        "云购生活·绍兴旗舰店",
+        "云购生活·开封社区店",
+        "云购生活·嘉兴社区店",
+        "云购生活·莆田旗舰店",
+        "云购生活·苏州旗舰店",
+        "云购生活·合肥购物中心店",
+        "云购生活·南通社区店"
+      ],
+      "province": [
+        "浙江省",
+        "江苏省",
+        "山东省",
+        "北京市",
+        "河南省",
+        "福建省",
+        "安徽省"
+      ],
+      "city": [
+        "青岛",
+        "北京",
+        "绍兴",
+        "开封",
+        "嘉兴",
+        "莆田",
+        "苏州",
+        "合肥",
+        "南通"
+      ]
+    }
   },
   "ydsh_ads.ads_user_value": {
     "database": "ydsh_ads",
@@ -373,7 +461,19 @@
         "type": "double",
         "comment": "平均 R 值（末单距 2024-12-31 天数）"
       }
-    ]
+    ],
+    "enums": {
+      "segment": [
+        "一般价值客户",
+        "一般保持客户",
+        "一般发展客户",
+        "一般挽留客户",
+        "重要价值客户",
+        "重要保持客户",
+        "重要发展客户",
+        "重要挽留客户"
+      ]
+    }
   },
   "ydsh_dws.dws_product_month": {
     "database": "ydsh_dws",
@@ -435,7 +535,33 @@
         "type": "string",
         "comment": "统计年月 yyyy-MM [分区键]"
       }
-    ]
+    ],
+    "enums": {
+      "category": [
+        "运动户外",
+        "数码家电",
+        "图书文娱",
+        "服饰鞋包",
+        "食品生鲜",
+        "家居生活",
+        "美妆个护",
+        "母婴玩具"
+      ],
+      "stat_ym": [
+        "2024-01",
+        "2024-12",
+        "2024-05",
+        "2024-10",
+        "2024-08",
+        "2024-07",
+        "2024-11",
+        "2024-03",
+        "2024-04",
+        "2024-09",
+        "2024-06",
+        "2024-02"
+      ]
+    }
   },
   "ydsh_dws.dws_store_month": {
     "database": "ydsh_dws",
@@ -492,7 +618,23 @@
         "type": "string",
         "comment": "统计年月 yyyy-MM [分区键]"
       }
-    ]
+    ],
+    "enums": {
+      "stat_ym": [
+        "2024-01",
+        "2024-02",
+        "2024-03",
+        "2024-04",
+        "2024-05",
+        "2024-06",
+        "2024-07",
+        "2024-08",
+        "2024-09",
+        "2024-10",
+        "2024-11",
+        "2024-12"
+      ]
+    }
   },
   "ydsh_dws.dws_trade_day": {
     "database": "ydsh_dws",
@@ -544,7 +686,29 @@
         "type": "string",
         "comment": "统计年月 yyyy-MM [分区键]"
       }
-    ]
+    ],
+    "enums": {
+      "channel": [
+        "门店",
+        "APP",
+        "PC官网",
+        "小程序"
+      ],
+      "stat_ym": [
+        "2024-03",
+        "2024-05",
+        "2024-07",
+        "2024-08",
+        "2024-10",
+        "2024-12",
+        "2024-01",
+        "2024-04",
+        "2024-06",
+        "2024-09",
+        "2024-11",
+        "2024-02"
+      ]
+    }
   },
   "ydsh_dws.dws_trade_week": {
     "database": "ydsh_dws",
@@ -586,7 +750,15 @@
         "type": "double",
         "comment": "客单价 = gmv / order_cnt"
       }
-    ]
+    ],
+    "enums": {
+      "channel": [
+        "APP",
+        "PC官网",
+        "小程序",
+        "门店"
+      ]
+    }
   },
   "ydsh_dws.dws_user_agg": {
     "database": "ydsh_dws",
@@ -663,7 +835,15 @@
         "type": "double",
         "comment": "M 值：累计成交金额"
       }
-    ]
+    ],
+    "enums": {
+      "member_level": [
+        "金卡会员",
+        "钻石会员",
+        "普通会员",
+        "银卡会员"
+      ]
+    }
   },
   "ydsh_dwd.dim_date": {
     "database": "ydsh_dwd",
@@ -715,7 +895,23 @@
         "type": "string",
         "comment": "年月 yyyy-MM"
       }
-    ]
+    ],
+    "enums": {
+      "year_month": [
+        "2024-01",
+        "2024-03",
+        "2024-05",
+        "2024-07",
+        "2024-08",
+        "2024-10",
+        "2024-12",
+        "2024-04",
+        "2024-06",
+        "2024-09",
+        "2024-11",
+        "2024-02"
+      ]
+    }
   },
   "ydsh_dwd.dim_member_level": {
     "database": "ydsh_dwd",
@@ -742,7 +938,21 @@
         "type": "double",
         "comment": "该等级默认折扣率"
       }
-    ]
+    ],
+    "enums": {
+      "level_name": [
+        "普通会员",
+        "银卡会员",
+        "金卡会员",
+        "钻石会员"
+      ],
+      "level_code": [
+        "L1",
+        "L2",
+        "L3",
+        "L4"
+      ]
+    }
   },
   "ydsh_dwd.dim_order_status": {
     "database": "ydsh_dwd",
@@ -769,7 +979,23 @@
         "type": "int",
         "comment": "是否为终态：1=终态 0=流转中"
       }
-    ]
+    ],
+    "enums": {
+      "status_name": [
+        "待支付",
+        "已支付",
+        "已完成",
+        "已取消",
+        "退款中"
+      ],
+      "status_code": [
+        "PENDING",
+        "PAID",
+        "COMPLETED",
+        "CANCELLED",
+        "REFUNDING"
+      ]
+    }
   },
   "ydsh_dwd.dim_pay_type": {
     "database": "ydsh_dwd",
@@ -791,7 +1017,21 @@
         "type": "int",
         "comment": "是否线上支付：1=是 0=否"
       }
-    ]
+    ],
+    "enums": {
+      "pay_name": [
+        "支付宝",
+        "微信支付",
+        "银行卡",
+        "货到付款"
+      ],
+      "pay_code": [
+        "ALIPAY",
+        "WECHAT",
+        "BANK",
+        "COD"
+      ]
+    }
   },
   "ydsh_dwd.dim_product": {
     "database": "ydsh_dwd",
@@ -858,7 +1098,24 @@
         "type": "int",
         "comment": "上架日期是否为补全值：1=补全 0=原始"
       }
-    ]
+    ],
+    "enums": {
+      "category": [
+        "运动户外",
+        "数码家电",
+        "图书文娱",
+        "服饰鞋包",
+        "食品生鲜",
+        "家居生活",
+        "美妆个护",
+        "母婴玩具"
+      ],
+      "status": [
+        "在售",
+        "下架",
+        "缺货"
+      ]
+    }
   },
   "ydsh_dwd.dim_store": {
     "database": "ydsh_dwd",
@@ -915,7 +1172,17 @@
         "type": "string",
         "comment": "店长姓名"
       }
-    ]
+    ],
+    "enums": {
+      "district": [
+        "开发区",
+        "新区",
+        "老城区",
+        "中心区",
+        "高新区",
+        "滨江区"
+      ]
+    }
   },
   "ydsh_dwd.dim_user": {
     "database": "ydsh_dwd",
@@ -992,7 +1259,20 @@
         "type": "int",
         "comment": "邮箱是否缺失：1=缺失 0=有值"
       }
-    ]
+    ],
+    "enums": {
+      "gender": [
+        "女",
+        "男",
+        "未知"
+      ],
+      "member_level": [
+        "金卡会员",
+        "钻石会员",
+        "普通会员",
+        "银卡会员"
+      ]
+    }
   },
   "ydsh_dwd.dwd_order": {
     "database": "ydsh_dwd",
@@ -1079,7 +1359,8 @@
         "type": "string",
         "comment": "订单年月 yyyy-MM [分区键]"
       }
-    ]
+    ],
+    "enums": {}
   },
   "ydsh_dwd.dwd_order_item": {
     "database": "ydsh_dwd",
@@ -1126,7 +1407,8 @@
         "type": "double",
         "comment": "明细金额 = quantity*unit_price*(1-discount)"
       }
-    ]
+    ],
+    "enums": {}
   },
   "ydsh_dwd.dwd_user_behavior": {
     "database": "ydsh_dwd",
@@ -1178,7 +1460,8 @@
         "type": "string",
         "comment": "行为年月 yyyy-MM [分区键]"
       }
-    ]
+    ],
+    "enums": {}
   },
   "ydsh_dwd.map_member_level": {
     "database": "ydsh_dwd",
@@ -1210,7 +1493,8 @@
         "type": "double",
         "comment": "该等级默认折扣率"
       }
-    ]
+    ],
+    "enums": {}
   },
   "ydsh_dwd.map_order_status": {
     "database": "ydsh_dwd",
@@ -1242,7 +1526,8 @@
         "type": "int",
         "comment": "是否为终态：1=终态 0=流转中"
       }
-    ]
+    ],
+    "enums": {}
   },
   "ydsh_dwd.map_pay_type": {
     "database": "ydsh_dwd",
@@ -1269,6 +1554,7 @@
         "type": "int",
         "comment": "是否线上支付：1=是 0=否"
       }
-    ]
+    ],
+    "enums": {}
   }
 }

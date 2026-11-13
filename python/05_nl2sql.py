@@ -48,10 +48,13 @@ SYSTEM_PROMPT = """你是企业数据仓库的 Hive SQL 专家。把用户的中
 3. GMV 口径：统计成交金额必须带 `is_gmv_included = 1`；
    若查的是 ads_* / dws_* 层的指标字段（gmv、sales_amt），这些表已按口径过滤，不要再加条件。
 4. 优先查 ads_* 层（面向业务的成品指标），需要下钻时再查 dws_* / dwd_*。
-5. 金额字段是 DOUBLE，需要两位小数时用 cast(x as decimal(18,2))，不要用 round(double,n)（本引擎会返回 NULL）。
-6. 结果行数可能很大时加 LIMIT，最多 200 行。
-7. 日期字段：order_date / stat_date 是 'yyyy-MM-dd' 字符串，年月用 substr(stat_date,1,7)。
-8. 只输出 SQL，不要输出解释、不要加 markdown 代码围栏。
+5. 枚举型字段（schema 里标注了「※ 该列实际取值」的列）必须原样引用其中列出的字符串，
+   禁止改写、缩写或按字段注释自行想象。这条最容易翻车：stat_scope 的真实值带后缀，
+   写成简称不会报错，只会静默返回 0 行。
+6. 金额字段是 DOUBLE，需要两位小数时用 cast(x as decimal(18,2))，不要用 round(double,n)（本引擎会返回 NULL）。
+7. 结果行数可能很大时加 LIMIT，最多 200 行。
+8. 日期字段：order_date / stat_date 是 'yyyy-MM-dd' 字符串，年月用 substr(stat_date,1,7)。
+9. 只输出 SQL，不要输出解释、不要加 markdown 代码围栏。
 
 {例子}
 
@@ -191,6 +194,21 @@ def offline_generate(question: str) -> str:
 
 
 # ---------------------------------------------------------------- 主链路 ----
+def _execute(sql: str):
+    """执行 SQL，返回 (df, 错误信息)。不抛异常，由调用方决定怎么处理。"""
+    try:
+        return query_df(sql, "ydsh_ads"), ""
+    except Exception as e:
+        return None, str(e)
+
+
+EMPTY_HINT = (
+    "上面这条 SQL 执行成功但返回 0 行。语法和字段都没问题，所以问题几乎一定出在过滤条件的取值上。"
+    "请逐项核对 WHERE 里出现的字符串字面量，是否与 schema 中「※ 该列实际取值」列出的原文完全一致"
+    "（注意括号、空格、后缀）。不要按字段注释或常理猜测取值，必须以 schema 列出的实际值为准。"
+)
+
+
 def ask(question: str, retry_on_error: bool = True) -> dict:
     schema_prompt = load_schema_prompt()
     mode = "LLM" if LLM_API_KEY else "OFFLINE"
@@ -213,21 +231,34 @@ def ask(question: str, retry_on_error: bool = True) -> dict:
         return {"question": question, "mode": mode, "ok": False, "error": "; ".join(warns),
                 "sql": sql, "rows": None}
 
-    try:
-        df = query_df(sql_checked, "ydsh_ads")
-    except Exception as e:
-        if retry_on_error and mode == "LLM":
-            try:
-                sql2 = llm_generate(question, schema_prompt, hint=str(e))
-                ok2, sql2_checked, warns2 = sql_guard.validate(sql2)
-                if ok2:
-                    df = query_df(sql2_checked, "ydsh_ads")
+    df, err = _execute(sql_checked)
+
+    # 关键：执行报错「和」返回 0 行都算一次不成功。
+    # 只判异常不判空结果是上一版的漏洞——0 行意味着 SQL 合法但语义错了，
+    # 这种静默错误如果计入「通过」，等于把错误当成功汇报。
+    bad = (df is None) or len(df) == 0
+    if bad and retry_on_error and mode == "LLM":
+        hint = (f"执行报错：{err}" if df is None else EMPTY_HINT)
+        try:
+            sql2 = llm_generate(question, schema_prompt, hint=hint)
+            ok2, sql2_checked, warns2 = sql_guard.validate(sql2)
+            if ok2:
+                df2, err2 = _execute(sql2_checked)
+                if df2 is not None and len(df2) > 0:
                     return {"question": question, "mode": mode + "+自修正", "ok": True,
-                            "error": "", "sql": sql2_checked, "rows": df, "warns": warns2}
-            except Exception as e2:
-                e = e2
-        return {"question": question, "mode": mode, "ok": False, "error": f"执行失败: {e}",
+                            "error": "", "sql": sql2_checked, "rows": df2,
+                            "warns": warns2, "retried": True}
+        except Exception:
+            pass                                        # 重试失败则退回第一次的结果说明
+
+    if df is None:
+        return {"question": question, "mode": mode, "ok": False, "error": f"执行失败: {err}",
                 "sql": sql_checked, "rows": None}
+
+    if len(df) == 0:
+        return {"question": question, "mode": mode, "ok": False, "empty": True,
+                "error": "执行成功但返回 0 行：SQL 合法、语义可能有误（多为过滤取值不存在），已尝试自修正仍未取到数据",
+                "sql": sql_checked, "rows": df}
 
     return {"question": question, "mode": mode, "ok": True, "error": "",
             "sql": sql_checked, "rows": df, "warns": warns}
@@ -256,9 +287,14 @@ def main() -> int:
         print(f"问：{q}")
         r = ask(q)
         if not r["ok"]:
-            print(f"[FAIL/{r['mode']}] {r['error']}")
+            tag = "EMPTY" if r.get("empty") else "FAIL"
+            print(f"[{tag}/{r['mode']}] {r['error']}")
+            if r.get("sql"):
+                print(f"SQL:\n{r['sql']}")
             records.append({"question": q, "mode": r["mode"], "ok": False,
-                            "sql": r.get("sql", ""), "error": r["error"], "rows": 0})
+                            "empty": bool(r.get("empty")), "retried": bool(r.get("retried")),
+                            "sql": r.get("sql", "").replace("\n", " ") if r.get("sql") else "",
+                            "error": r["error"], "rows": 0})
             continue
         print(f"SQL（{r['mode']}）:\n{r['sql']}")
         if r.get("warns"):
@@ -267,13 +303,19 @@ def main() -> int:
         print(f"结果（{len(df)} 行）:")
         print(df.head(10).to_string(index=False))
         records.append({"question": q, "mode": r["mode"], "ok": True,
+                        "empty": False, "retried": bool(r.get("retried")),
                         "sql": r["sql"].replace("\n", " "), "error": "", "rows": len(df)})
 
     out = OUTPUT_DIR / f"nl2sql_results_{'llm' if LLM_API_KEY else 'offline'}.csv"
     pd.DataFrame(records).to_csv(out, index=False, encoding="utf-8-sig")
     ok_cnt = sum(1 for r in records if r["ok"])
+    empty_cnt = sum(1 for r in records if r["empty"])
+    retry_cnt = sum(1 for r in records if r["retried"])
     print("\n" + "=" * 78)
-    print(f"通过 {ok_cnt}/{len(records)} 题，明细已写入 {out}")
+    print(f"通过 {ok_cnt}/{len(records)} 题"
+          + (f"（其中 {retry_cnt} 题经自修正成功）" if retry_cnt else "")
+          + (f"，空结果 {empty_cnt} 题" if empty_cnt else ""))
+    print(f"明细已写入 {out}")
     return 0 if ok_cnt == len(records) else 1
 
 
