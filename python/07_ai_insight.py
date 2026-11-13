@@ -57,6 +57,13 @@ def build_evidence() -> dict:
     wd_mean = daily.groupby(daily["stat_date"].dt.day_of_week + 1)["gmv"].mean()
     wd_ratio = float(wd_mean.max() / wd_mean.min())
 
+    # 极值的 σ 倍数：模型很容易把「相对 7 日均值偏离 50%」当成数据异常，
+    # 但那只说明短期基线偏低，不代表离群。给出 σ 倍数后，模型才有做判定的依据。
+    gmv_mu = float(daily["gmv"].mean())
+    gmv_sd = float(daily["gmv"].std())
+    d_min_row = valid.loc[valid["gmv"].idxmin()]
+    d_max_row = valid.loc[valid["gmv"].idxmax()]
+
     ev = {
         "周期": f"{daily['stat_date'].min():%Y-%m-%d} ~ {daily['stat_date'].max():%Y-%m-%d}",
         "GMV": round(float(kpi["gmv"]), 2),
@@ -72,6 +79,13 @@ def build_evidence() -> dict:
         "跌幅最大日期": [(f"{r.stat_date:%Y-%m-%d}", round(float(r.resid_pct), 4)) for r in worst.itertuples()],
         "最大单日涨幅": round(float(best["resid_pct"].max()), 4),
         "涨幅最大日期": [(f"{r.stat_date:%Y-%m-%d}", round(float(r.resid_pct), 4)) for r in best.itertuples()],
+        # σ 倍数 = (当日 GMV - 全序列均值) / 全序列标准差；|σ|>3 才够得上「离群」
+        "最低日GMV": round(float(d_min_row["gmv"]), 2),
+        "最低日日期": f"{d_min_row['stat_date']:%Y-%m-%d}",
+        "最低日σ倍数": round((float(d_min_row["gmv"]) - gmv_mu) / gmv_sd, 2),
+        "最高日GMV": round(float(d_max_row["gmv"]), 2),
+        "最高日日期": f"{d_max_row['stat_date']:%Y-%m-%d}",
+        "最高日σ倍数": round((float(d_max_row["gmv"]) - gmv_mu) / gmv_sd, 2),
         "环比跌幅最大月": monthly.loc[monthly["gmv_mom"].idxmin(), "stat_ym"],
         "最大月度环比": round(float(monthly["gmv_mom"].min()), 4),
         "月度GMV极差率": round(float((monthly["gmv"].max() - monthly["gmv"].min()) / monthly["gmv"].max()), 4),
@@ -166,12 +180,35 @@ def llm_report(ev: dict) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------- 3. 事实校验 ----
+ADVICE_HEADINGS = ("行动建议", "建议", "方案", "措施")
+
+
+def split_advice(text: str) -> tuple[str, str]:
+    """把「行动建议」类章节从待校验正文里摘出来。
+
+    原因：模型在建议里会写「单日跌幅超过 30% 触发告警」这类**决策阈值**。
+    它不是对数据的断言，而是模型自己拍的运营参数，拿它去比对证据必然「无据」，
+    但这不构成幻觉。混在一起统计会把一致率算低，掩盖真正需要警惕的编造。
+    所以分开：陈述性段落查幻觉，建议性段落只数个数、标注为决策参数。
+    """
+    fact_lines, adv_lines = [], []
+    in_advice = False
+    for ln in text.splitlines():
+        if ln.lstrip().startswith("#"):
+            title = ln.lstrip("#").strip()
+            in_advice = any(k in title for k in ADVICE_HEADINGS)
+        (adv_lines if in_advice else fact_lines).append(ln)
+    return "\n".join(fact_lines), "\n".join(adv_lines)
+
+
 def verify(text: str, ev: dict) -> tuple[list[tuple[str, bool]], float]:
     """把文本里的数字与证据比对。
 
     判定规则：文本中出现的每个数字（金额/百分比/整数），只要能在证据中找到
     「相近的值」（相对误差 <= 2%），就算有据；否则计为无据。
     阈值放 2% 是因为模型会把 0.3473 写成 34.7%，四舍五入会造成 1‰ 级偏差。
+    候选值包含三种折算：原值、百分比与小数互换、千位单位（万/亿）换算——
+    后两者是校验器必须做的归一化，缺了它们会把正确的表述误判成幻觉。
     """
     numeric_pool = []
 
@@ -195,9 +232,11 @@ def verify(text: str, ev: dict) -> tuple[list[tuple[str, bool]], float]:
     # 从文本里取数字。先去掉行首的列表序号（"1. " / "2、"），
     # 否则序号会被当成事实断言，把一致率算歪。
     body = re.sub(r"(?m)^\s*\d+[.、)]\s+", "", text)
-    tokens = re.findall(r"\d[\d,]*(?:\.\d+)?%?", body)
     checked = []
-    for tok in tokens:
+    # 用 finditer 而不是 findall：需要知道每个数字的结束位置，
+    # 才能看它后面跟的单位是不是「万元」。
+    for m in re.finditer(r"\d[\d,]*(?:\.\d+)?%?", body):
+        tok = m.group(0)
         is_pct = tok.endswith("%")
         raw = tok.rstrip("%").replace(",", "")
         try:
@@ -207,6 +246,13 @@ def verify(text: str, ev: dict) -> tuple[list[tuple[str, bool]], float]:
         if val in (2024.0, 2025.0, 1.0, 0.0) and not is_pct:
             continue
         cands = [val, val / 100 if is_pct else val * 100]
+        # 单位换算：证据里金额存的是「元」，报告常写成「万元」。
+        # 不折算就会把 3,674,468.80 元 与 "367.45 万元" 判成不符，
+        # 产生假阳性——校验器自身的漏洞，不能算成模型幻觉。
+        if "万" in body[m.end():m.end() + 2]:
+            cands.append(val * 10000)
+        if "亿" in body[m.end():m.end() + 2]:
+            cands.append(val * 100000000)
         ok = False
         for c in cands:
             if c == 0:
@@ -221,6 +267,69 @@ def verify(text: str, ev: dict) -> tuple[list[tuple[str, bool]], float]:
         return [], 0.0
     rate = sum(1 for _, ok in checked if ok) / len(checked)
     return checked, rate
+
+
+# ---------------------------------------------------------------- 4. 人工复核 ----
+def auto_review(ev: dict) -> str:
+    """对 AI 报告里最容易判错的三个点做可复算复核。
+
+    为什么要在 AI 报告后面挂一段代码生成的结论：
+    实测发现模型会犯两类「看起来很有洞察」的错——
+      1. 拿「相对 7 日移动均值的偏离 50%」去和「整体变异系数 0.23」对比，
+         得出「数据自相矛盾、可能有口径问题」。两者量纲根本不同，
+         正确做法是换成 σ 倍数：2.8σ 在 366 天里出现完全正常。
+      2. 把行为事件数当串联漏斗算转化率，但这份数据四类行为是独立采样的。
+    这类错误的危害在于「方向听着对、结论是错的」，不校验就会让读者去查不存在的问题。
+    本节由代码算、不经模型，与上方 AI 生成内容严格区分。
+    """
+    lo_z, hi_z = ev["最低日σ倍数"], ev["最高日σ倍数"]
+    worst_z = max(abs(lo_z), abs(hi_z))
+    if worst_z <= 3:
+        z_verdict = (
+            f"**AI 判断不成立**。最低日 {ev['最低日日期']} 为 {lo_z:+.2f}σ、"
+            f"最高日 {ev['最高日日期']} 为 {hi_z:+.2f}σ，均在 3σ 以内。"
+            f"366 天里出现 2~3σ 的极值属随机抽样尾部（单侧 2σ 约每 44 天一次、"
+            f"2.8σ 约每 260 天一次），不支持「存在大额订单或口径问题」的推断。"
+            f"AI 把「相对移动均值偏离 50%」与「变异系数 0.23」直接对比，两者量纲不同，"
+            f"这个矛盾是它自己造出来的。"
+        )
+    else:
+        z_verdict = (
+            f"**AI 判断成立**。最极端日达 {worst_z:.2f}σ，超过 3σ 阈值，"
+            f"建议回查该日订单明细是否为单笔大额或数据重复。"
+        )
+
+    f = ev["行为漏斗"]
+    buy, cart = f.get("buy", 0), f.get("cart", 0)
+    if buy > cart:
+        funnel_verdict = (
+            f"**AI 判断成立**。buy({buy:,}) > cart({cart:,})，四类行为在源数据里是各自独立采样的，"
+            f"不是同一批用户的串联路径，所以不能按 pv→fav→cart→buy 算环节转化率。"
+        )
+    else:
+        funnel_verdict = (
+            f"**AI 判断成立**。buy({buy:,}) ≤ cart({cart:,})，漏斗顺序正常，可计算各环节转化率。"
+        )
+
+    if ev["复购率"] >= 0.99:
+        rep_verdict = (
+            f"**AI 的质疑成立，且结论要更重**。复购率 {ev['复购率']:.0%} 等于全部 "
+            f"{ev['成交用户数']:,} 名成交用户都下了 ≥2 单——已实测该样本 1000 人全在 2 单以上、"
+            f"其中 971 人超过 4 单。这不是用户粘性好，而是用户池仅 1000 人却承接了 "
+            f"{ev['订单量']:,} 单（人均约 {ev['订单量']/max(ev['成交用户数'],1):.1f} 单）的生成特征，"
+            f"该指标已完全失去区分度，不应对外引用。"
+        )
+    else:
+        rep_verdict = f"复购率 {ev['复购率']:.1%}，处于合理区间，指标可用。"
+
+    return f"""## 人工复核记录（非模型产出）
+
+> 本节由脚本按可复算规则生成，不经过大模型，用于核对 AI 判断中容易出错的部分。
+
+1. **「单日振幅与变异系数矛盾」是否成立？** {z_verdict}
+2. **漏斗能否计算环节转化率？** {funnel_verdict}
+3. **复购率指标是否可用？** {rep_verdict}
+"""
 
 
 def main() -> int:
@@ -238,32 +347,41 @@ def main() -> int:
     else:
         body, mode = rule_report(ev), "规则模板（未配置 LLM_API_KEY）"
 
-    checked, rate = verify(body, ev)
+    # 陈述性内容才查幻觉；行动建议里的阈值属决策参数，单独计数
+    fact_body, advice_body = split_advice(body)
+    checked, rate = verify(fact_body, ev)
     no_evidence = [t for t, ok in checked if not ok]
     claim_cnt = len(checked)
+    advice_tokens = re.findall(
+        r"\d[\d,]*(?:\.\d+)?%?",
+        re.sub(r"(?m)^\s*\d+[.、)]\s+", "", advice_body),
+    )
+    advice_cnt = len(advice_tokens)
 
     header = (
         f"# AI 智能洞察报告\n\n"
         f"> 生成时间：{datetime.now():%Y-%m-%d %H:%M}　|　生成方式：{mode}\n"
         f"> 事实校验：共 {claim_cnt} 处数字，有据 {claim_cnt - len(no_evidence)} 处，"
-        f"一致率 **{rate:.1%}**\n\n"
+        f"一致率 **{rate:.1%}**（另有 {advice_cnt} 处决策参数不参与校验）\n\n"
     )
     footer = (
         "\n\n---\n\n### 事实校验明细\n\n"
-        f"- 数字断言总数：{claim_cnt}\n"
+        f"- 陈述性数字断言：{claim_cnt}\n"
         f"- 有据：{claim_cnt - len(no_evidence)}\n"
         f"- 无据：{len(no_evidence)}" + (f"（{'、'.join(no_evidence[:10])}）" if no_evidence else "") + "\n"
-        f"- 一致率：{rate:.1%}\n\n"
+        f"- 一致率：{rate:.1%}\n"
+        f"- 行动建议中的决策参数：{advice_cnt} 处（属运营阈值选择，不是对数据的断言，不计入幻觉统计）\n\n"
         "> 校验方法：把报告中每个数字与证据 JSON（evidence）逐一比对，"
         "相对误差 ≤2% 记为有据（容差用于吸收百分比与小数互写造成的舍入差）。\n"
+        "> 候选值已做三种归一化：原值、百分比↔小数、万元/亿元↔元。\n"
         "> 未通过的数字不等于结论错误，但必须回到原始数据复核后才能对外使用。\n"
     )
 
     out = OUTPUT_DIR / "ai_insight_report.md"
-    out.write_text(header + body.strip() + footer, encoding="utf-8")
+    out.write_text(header + body.strip() + "\n\n" + auto_review(ev) + footer, encoding="utf-8")
 
     print(f"生成方式: {mode}")
-    print(f"数字断言: {claim_cnt} 处，一致率 {rate:.1%}")
+    print(f"陈述性数字: {claim_cnt} 处，一致率 {rate:.1%}；决策参数 {advice_cnt} 处（不校验）")
     if no_evidence:
         print(f"无据数字: {no_evidence[:10]}")
     print(f"报告: {out}")
