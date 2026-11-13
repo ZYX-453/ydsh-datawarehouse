@@ -1,0 +1,8 @@
+﻿question,mode,ok,sql,error,rows
+2024 年全年 GMV 是多少，订单量和客单价呢,OFFLINE,True,"SELECT stat_scope, cast(gmv as decimal(18,2)) AS gmv, order_cnt, cast(aov as decimal(18,2)) AS aov, active_users FROM ydsh_ads.ads_kpi_overview LIMIT 10",,1
+广东省上个月的销售额是多少,OFFLINE,True,"SELECT stat_ym, cast(sum(gmv) as decimal(18,2)) AS gmv, sum(order_cnt) AS order_cnt FROM ydsh_dws.dws_store_month WHERE province = '广东省' AND stat_ym = (SELECT max(stat_ym) FROM ydsh_dws.dws_store_month) GROUP BY stat_ym LIMIT 10",,1
+销量最高的前 5 个品类,OFFLINE,True,"SELECT rk, category, cast(sales_amt as decimal(18,2)) AS sales_amt, cast(sales_share as decimal(8,4)) AS sales_share, order_cnt FROM ydsh_ads.ads_category_rank ORDER BY rk LIMIT 5",,5
+复购率是多少,OFFLINE,True,"SELECT cast(gmv as decimal(18,2)) AS gmv, order_cnt, repurchase_users, cast(repurchase_rate as decimal(8,4)) AS repurchase_rate FROM ydsh_ads.ads_kpi_overview LIMIT 10",,1
+2024 年 6 月的 GMV 和环比,OFFLINE,True,"SELECT stat_ym, cast(gmv as decimal(18,2)) AS gmv, cast(gmv_mom as decimal(8,4)) AS gmv_mom FROM ydsh_ads.ads_kpi_month WHERE stat_ym = '2024-06' LIMIT 10",,1
+门店销售额前 5 名,OFFLINE,True,"SELECT rk, store_name, province, cast(gmv as decimal(18,2)) AS gmv, order_cnt FROM ydsh_ads.ads_store_top10 ORDER BY rk LIMIT 5",,5
+用户价值分层各层占比,OFFLINE,True,"SELECT segment, user_cnt, cast(gmv as decimal(18,2)) AS gmv, cast(gmv_share as decimal(8,4)) AS gmv_share FROM ydsh_ads.ads_user_value ORDER BY gmv DESC LIMIT 20",,8
