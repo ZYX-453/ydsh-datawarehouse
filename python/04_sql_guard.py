@@ -76,6 +76,35 @@ def _cte_names(clean: str) -> set[str]:
     return set(re.findall(r"(?:with|,)\s+([a-z_]\w*)\s+as\s*\(", clean))
 
 
+# 裸字段校验用的保留字：SQL 语法词 + Hive 类型名。
+# 为什么要单独一张表：裸标识符抽取是纯词法分析，分不清 `desc`（排序）和 `gmv`（字段），
+# 只能靠白名单把这些语法词排除掉，剩下的才当候选字段去比对 Schema。
+RESERVED_WORDS = SQL_KEYWORDS | {
+    "from", "distinct", "between", "like", "in", "not", "null", "is", "desc", "asc",
+    "case", "when", "then", "else", "end", "interval", "over", "partition", "by",
+    "rows", "range", "unbounded", "preceding", "following", "current", "row",
+    "cast", "decimal", "double", "int", "bigint", "string", "date", "boolean",
+    "float", "smallint", "tinyint", "timestamp", "varchar", "char",
+    "true", "false", "all", "any", "exists", "nulls", "first", "last",
+}
+
+
+def _bare_identifiers(clean: str) -> list[str]:
+    """抽出不带表前缀、也不是函数调用的标识符。
+
+    注意这里必须用 finditer + 手工看后一个字符，不能写成 `([a-z_]+\\w*)(?![.(])`：
+    正则回溯会把 `sum(` 退化成匹配 `su`，反而把函数名的前缀当成字段。
+    """
+    s = _strip_literals(clean)
+    out: list[str] = []
+    for m in re.finditer(r"(?<![.\w])([a-z_]\w*)", s):
+        nxt = s[m.end():m.end() + 2].lstrip()
+        if nxt[:1] in ("(", "."):      # 函数调用 / 库名表名前缀
+            continue
+        out.append(m.group(1))
+    return out
+
+
 def _alias_map(clean: str, schema: dict) -> dict[str, str]:
     """建立 别名 → 真实表 的映射，用于逐表校验字段。
 
@@ -148,6 +177,23 @@ def validate(sql: str, schema: dict | None = None) -> tuple[bool, str, list[str]
                 f"字段 `{alias}.{col}` 不存在于 {table}（该表字段：{', '.join(sorted(cols))[:120]}）"
             ]
 
+    # 闸 2c：单表查询的裸字段校验
+    #   闸 2b 只认 `别名.字段`，`select product_id from dwd_order` 因为没写别名会被整个放过，
+    #   而这正是最危险的一类错——dwd_order 根本没有 product_id，SQL 会直接报错。
+    #   只在「单表」时做：多表 JOIN 下裸字段可能属于任一表，静态判定会大量误杀。
+    uniq_tables = sorted(set(resolved))
+    if len(uniq_tables) == 1:
+        t = uniq_tables[0]
+        cols = {c["name"].lower() for c in schema[t]["columns"]}
+        out_aliases = set(re.findall(r"\bas\s+([a-z_]\w*)", _strip_literals(clean)))
+        skip = RESERVED_WORDS | out_aliases | cte | set(amap) | {t.split(".")[-1]}
+        unknown = sorted({tok for tok in _bare_identifiers(clean) if tok not in cols and tok not in skip})
+        if unknown:
+            return False, raw, [
+                f"字段 {', '.join('`' + u + '`' for u in unknown)} 不存在于 {t}"
+                f"（该表字段：{', '.join(sorted(cols))[:120]}）"
+            ]
+
     # 闸 3：补 LIMIT
     sql_out = raw
     if not re.search(r"\blimit\s+\d+", clean):
@@ -175,6 +221,9 @@ CASE_SQL_OK = [
     ("SELECT * FROM ads_sales_daily", True),
     # 回归用例：字面量里出现写操作关键字，不应被误判
     ("SELECT * FROM ads_kpi_overview WHERE stat_scope = 'a drop test' LIMIT 3", True),
+    # 回归用例：单表裸字段，dwd_order 没有 product_id（闸 2c 的核心场景）
+    ("SELECT product_id FROM dwd_order LIMIT 5", False),
+    ("SELECT order_status, sum(pay_amount) FROM dwd_order GROUP BY order_status LIMIT 5", True),
 ]
 
 
