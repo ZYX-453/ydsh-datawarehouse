@@ -175,7 +175,7 @@
 |---|---|---|---|
 | 第 1 周 | 项目启动 · 环境搭建 · 数据导入与清洗（一） | Docker/Hive/MySQL 环境、Git 规范、ODS 导入、五维预评估、缺失值与重复值处理 | **已完成** |
 | 第 2 周 | 清洗进阶 · 四层建模 · 探索性分析 | 枚举标准化、异常值/格式统一、质量对比报告、星型模型、分区表、EDA | **已完成** |
-| 第 3 周 | 数据分析 · 预测建模 · AI 协同（NL2SQL） | DWS 汇总层、ADS 指标、KPI 计算、时间序列预测、NL2SQL、AI 洞察、Git 协同实战 | **已完成**（NL2SQL 的大模型链路待配 `LLM_API_KEY` 实测，代码已就绪） |
+| 第 3 周 | 数据分析 · 预测建模 · AI 协同（NL2SQL） | DWS 汇总层、ADS 指标、KPI 计算、时间序列预测、NL2SQL、AI 洞察、Git 协同实战 | **已完成**（DeepSeek 实测：NL2SQL 7/7 通过，AI 洞察一致率 100%） |
 | 第 4 周 | 智能应用 · 可视化 · 部署 | NL2SQL、Superset 仪表板、ECharts 大屏、Docker 一键部署 | 待启动 |
 
 ---
@@ -252,6 +252,19 @@ PYTHON_BIN=/path/to/venv/Scripts/python.exe bash run_all.sh ml
 
 `ai` 阶段在未配置 `LLM_API_KEY` 时自动降级：NL2SQL 走规则兜底（输出标注 `OFFLINE`），
 AI 洞察用规则模板生成（报告首行标注生成方式），不会伪装成大模型产出。
+
+配置密钥后（DeepSeek 实测）：
+
+```bash
+cp .env.example .env    # 填 LLM_API_KEY，.env 已被 .gitignore 排除
+PYTHON_BIN=.../Scripts/python.exe bash run_all.sh ai
+```
+
+| 脚本 | 实测结果 |
+|---|---|
+| `06_llm_ping.py` | 连通 1.38s，结构化 JSON 输出可解析 |
+| `05_nl2sql.py` | 7/7 通过，结果写 `output/nl2sql_results_llm.csv` |
+| `07_ai_insight.py` | 41 处陈述性断言，一致率 100%，另有 3 处决策参数不校验 |
 
 ### 9.3 手工执行（调试用）
 

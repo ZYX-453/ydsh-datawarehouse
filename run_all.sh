@@ -327,6 +327,10 @@ run_py_series() {
 run_py_ai() {
     log "========== 阶段 8/8：Schema 抽取 / AI 洞察 / NL2SQL（第 3 周）=========="
     require_python
+    # 先探活：只在 .env 里确实填了密钥时才跑，避免无密钥场景刷一屏 SKIP 干扰日志
+    if [ -f "$SCRIPT_DIR/.env" ] && grep -q '^LLM_API_KEY=.\+' "$SCRIPT_DIR/.env" 2>/dev/null; then
+        ( cd "$SCRIPT_DIR/python" && "$PY" 06_llm_ping.py ) || warn "大模型连通性自检未通过，后续脚本会自动降级为规则模板"
+    fi
     ( cd "$SCRIPT_DIR/python" && "$PY" 03_schema_extract.py ) || exit 1
     # 07 无密钥时用规则模板生成同结构报告，并在文首标注生成方式
     ( cd "$SCRIPT_DIR/python" && "$PY" 07_ai_insight.py ) || exit 1
