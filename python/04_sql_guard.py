@@ -23,6 +23,7 @@ WRITE_KEYWORDS = (
     "create", "grant", "revoke", "load", "msck", "set",
 )
 DEFAULT_LIMIT = 200
+MAX_LIMIT = 1000        # 超过此值的 LIMIT 只告警不拦截：可能确有导出需求
 
 
 def load_schema() -> dict:
@@ -148,11 +149,16 @@ def validate(sql: str, schema: dict | None = None) -> tuple[bool, str, list[str]
                 f"字段 `{alias}.{col}` 不存在于 {table}（该表字段：{', '.join(sorted(cols))[:120]}）"
             ]
 
-    # 闸 3：补 LIMIT
+    # 闸 3：补 LIMIT，并对过大的 LIMIT 告警
+    #   补 LIMIT 是为了防止「查全表」；反过来，模型偶尔会写 LIMIT 100000 这种，
+    #   在 Hive 上等于把结果全拉回客户端，同样要提示。
     sql_out = raw
-    if not re.search(r"\blimit\s+\d+", clean):
+    lim = re.search(r"\blimit\s+(\d+)", clean)
+    if lim is None:
         sql_out = f"{raw}\nLIMIT {DEFAULT_LIMIT}"
         warns.append(f"未写 LIMIT，已自动补 LIMIT {DEFAULT_LIMIT}")
+    elif int(lim.group(1)) > MAX_LIMIT:
+        warns.append(f"LIMIT {lim.group(1)} 超过建议上限 {MAX_LIMIT}，Hive 侧返回大结果集会明显变慢")
 
     return True, sql_out, warns
 
