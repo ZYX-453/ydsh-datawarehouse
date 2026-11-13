@@ -119,8 +119,33 @@
 │   │   ├── 01_dim_date.sql                 日期维度生成
 │   │   ├── 02_eda.sql                      探索性分析
 │   │   └── 03_bucket_experiment.sql        分桶表实验（演示级，不进主链路）
+│   ├── dws/                   第3周：DWS 汇总层
+│   │   ├── 01_create_dws_tables.sql        5 张汇总表建表
+│   │   ├── 02_load_dws_trade_day.sql       日 × 渠道
+│   │   ├── 03_load_dws_store_month.sql     月 × 门店
+│   │   ├── 04_load_dws_product_month.sql   月 × 商品（含金额分摊中间表）
+│   │   ├── 05_load_dws_trade_week.sql      周汇总
+│   │   └── 06_load_dws_user_agg.sql        用户累计快照
+│   ├── ads/                   第3周：ADS 应用层
+│   │   ├── 01_create_ads_tables.sql        8 张应用表建表
+│   │   ├── 02_load_ads_kpi.sql             核心 KPI
+│   │   ├── 03_load_ads_category.sql        品类排名
+│   │   ├── 04_load_ads_region.sql          省份排名
+│   │   ├── 05_load_ads_user_value.sql      RFM 用户分层
+│   │   └── 06_load_ads_funnel_daily.sql    行为漏斗
 │   └── fix/                   环境修复脚本
 │       └── fix_metastore_charset.sql
+├── python/                    第3周：分析、建模与 AI 应用
+│   ├── 01_extract_series.py   从 ADS 抽日/月序列
+│   ├── 02_predict_gmv.py      特征工程 + 多模型回测 + 7 天预测 + 出图
+│   ├── 03_schema_extract.py   抽取 Hive Schema 生成 Prompt 上下文
+│   ├── 04_sql_guard.py        NL2SQL 的 SQL 安全校验（只读/表名/字段/LIMIT）
+│   ├── 05_nl2sql.py           自然语言 → SQL → 执行 → 结果
+│   ├── 06_llm_ping.py         大模型连通性最小验证
+│   ├── 07_ai_insight.py       异常检测 + 归因 + 自动报告 + 事实校验
+│   ├── common.py              Hive 连接与路径公共模块
+│   └── requirements.txt       Python 依赖清单
+├── output/                    分析产物（KPI 结果表、预测结果、Schema、自动报告）
 ├── scripts/
 │   ├── prepare_data.py        数据预处理（CRLF→LF、去 BOM、校验）
 │   └── build_quality_xlsx.py  质量评估表 xlsx 生成
@@ -133,7 +158,11 @@
 │   ├── 06_数据质量清洗报告.md      第2周交付
 │   ├── 07_数仓架构设计.md          第2周交付
 │   ├── 08_探索性分析简报.md        第2周交付
-│   └── images/                     截图与架构图
+│   ├── 09_指标口径与ADS设计.md     第3周交付
+│   ├── 10_预测建模分析报告.md      第3周交付
+│   ├── 11_AI智能洞察与反思.md      第3周交付
+│   ├── 12_Git协同实践记录.md       第3周交付
+│   └── images/                     截图、架构图与建模图
 ├── run_all.sh                 一键执行脚本
 └── 模拟数据/                  原始数据集（不纳入版本库）
 ```
@@ -146,7 +175,7 @@
 |---|---|---|---|
 | 第 1 周 | 项目启动 · 环境搭建 · 数据导入与清洗（一） | Docker/Hive/MySQL 环境、Git 规范、ODS 导入、五维预评估、缺失值与重复值处理 | **已完成** |
 | 第 2 周 | 清洗进阶 · 四层建模 · 探索性分析 | 枚举标准化、异常值/格式统一、质量对比报告、星型模型、分区表、EDA | **已完成** |
-| 第 3 周 | ADS 指标 · 分析与预测 | KPI 指标计算、时间序列预测、DWS 汇总层建设 | 待启动 |
+| 第 3 周 | 数据分析 · 预测建模 · AI 协同（NL2SQL） | DWS 汇总层、ADS 指标、KPI 计算、时间序列预测、NL2SQL、AI 洞察、Git 协同实战 | **已完成**（NL2SQL 的大模型链路待配 `LLM_API_KEY` 实测，代码已就绪） |
 | 第 4 周 | 智能应用 · 可视化 · 部署 | NL2SQL、Superset 仪表板、ECharts 大屏、Docker 一键部署 | 待启动 |
 
 ---
@@ -170,8 +199,14 @@
 
 ### 8.3 数据口径声明（重要）
 
-- **营收类指标（GMV、销售额、客单价、营收趋势）统一以 `ods_order.pay_amount` 为唯一口径**
-- `ods_order_item` 仅用于结构分析：品类占比、销量、件数、连带率，不参与金额汇总
+- **营收类指标（GMV、销售额、客单价、营收趋势）统一以 `dwd_order.pay_amount` 为唯一金额来源**，
+  且必须带 `is_gmv_included = 1`（已支付 / 已完成计入，待支付 / 已取消 / 退款中不计入）
+- `dwd_order_item.item_amount` 是**吊牌价口径**，全年合计约 2.66 亿，是实付金额的 10 倍量级，
+  **不得直接用于金额汇总**
+- 需要按商品/品类拆分金额时，用「明细金额占比分摊实付金额」的方式：
+  `pay_amount × item_amount / 该订单明细金额合计`，保证分摊后各品类合计仍等于 GMV
+  （实现见 `sql/dws/04_load_dws_product_month.sql`，四路独立聚合交叉校验见 docs/09 第五节）
+- `dwd_order` **没有** `product_id` 字段，商品信息必须经 `dwd_order_item` 关联 `dim_product`
 
 ---
 
@@ -202,7 +237,21 @@ bash run_all.sh            # 预处理 → 建库 → 建表 → 导入 → 质�
 ```bash
 bash run_all.sh ods      # 仅 ODS 层（含预处理与字符集修复）
 bash run_all.sh clean    # 仅清洗层（前提：ODS 已就绪）
+bash run_all.sh week2    # 第 2 周：重建 DWD + 清洗进阶 + 质量对比 + EDA
+bash run_all.sh week3    # 第 3 周 SQL 部分：DWS 汇总层 + ADS 应用层
+bash run_all.sh ml       # 第 3 周建模：日序列抽取 + 预测建模（需 Python 依赖）
+bash run_all.sh ai       # 第 3 周 AI：Schema 抽取 + AI 洞察 + NL2SQL
+bash run_all.sh week3all # 第 3 周全部：DWS + ADS + 建模 + AI
 ```
+
+Python 阶段用 `PYTHON_BIN` 指定解释器，避免装到系统 Python：
+
+```bash
+PYTHON_BIN=/path/to/venv/Scripts/python.exe bash run_all.sh ml
+```
+
+`ai` 阶段在未配置 `LLM_API_KEY` 时自动降级：NL2SQL 走规则兜底（输出标注 `OFFLINE`），
+AI 洞察用规则模板生成（报告首行标注生成方式），不会伪装成大模型产出。
 
 ### 9.3 手工执行（调试用）
 
@@ -250,11 +299,14 @@ docker exec hive-server beeline -u jdbc:hive2://localhost:10000 -f /sql/ods/01_c
 |---|---|
 | ODS 六表行数 | 1000 / 600 / 60 / 15600 / 37549 / 60000 |
 | BOM、CR 残留 | 均为 0 |
-| DWD 用户表 | 1000 行，缺失值 0 |
-| DWD 商品表 | 600 行，缺失值 0 |
-| DWD 订单表 | **15000** 行（去重删 600） |
-| 明细表孤儿订单 | 0 |
-| 修复率 | 787 项 → 100% |
+| DWD 维度表 | dim_user 1000 / dim_product 600 / dim_store 60 / dim_date 366 |
+| DWD 事实表 | dwd_order **15000**（12 个月分区）/ dwd_order_item 37549 / dwd_user_behavior 60000 |
+| DWD 清洗修复率 | 18 项全部 100%，合计 36,204 条 |
+| DWS 汇总表 | trade_day 1463 / trade_week 212 / store_month 720 / product_month 6993 / user_agg 1000 |
+| ADS KPI | GMV **24,717,464.96** / 订单 **9,992** / 客单价 **2,473.73** |
+| ADS 交叉校验 | 品类 / 省份 / 用户 / 日报四路合计均等于 24,717,464.96 |
+| 预测模型 | 线性回归 MAPE 13.65%（常数均值基线 13.19%，模型未战胜基线，见 docs/10） |
+| 事实校验 | 自动报告 35 个数字断言，一致率 100% |
 
 ### 9.6 相关文档
 
